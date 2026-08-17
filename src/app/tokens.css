@@ -1,0 +1,150 @@
+/* Hallmark · macrostructure: Workbench · genre: atmospheric · theme: Midnight
+ * tone: atmospheric/technical · anchor hue: violet (cool) · nav: N5 Floating pill · footer: Ft2 Inline
+ * audience: creators/hobbyists · use: generate images via multi-service adapters · pre-emit critique: P5 H4 E5 S4 R5 V5
+ */
+
+:root {
+  /* Midnight — dark canvas, two cool blooms, single violet accent. Geist sans + mono.
+     axes: paper-band=dark · display-style=geometric-sans · accent-hue=cool */
+
+  /* Paper scale — elevated cards replace hairlines */
+  --color-paper: oklch(16% 0.012 270);        /* canvas */
+  --color-paper-2: oklch(20% 0.014 270);      /* raised card */
+  --color-paper-3: oklch(24% 0.016 270);      /* hover card */
+  --color-paper-4: oklch(28% 0.018 270);      /* active / inset */
+
+  /* Ink */
+  --color-ink: oklch(96% 0.006 270);
+  --color-ink-2: oklch(74% 0.012 270);
+  --color-ink-3: oklch(56% 0.014 270);
+
+  /* Accent — single cool violet */
+  --color-accent: oklch(70% 0.16 285);
+  --color-accent-2: oklch(62% 0.20 300);      /* secondary pink-magenta, used sparingly */
+  --color-accent-ink: oklch(16% 0.012 270);
+
+  /* States */
+  --color-danger: oklch(68% 0.19 22);
+  --color-warn: oklch(80% 0.15 75);
+  --color-ok: oklch(72% 0.16 155);
+  --color-focus: var(--color-accent);
+
+  /* Lines (used rarely — elevated cards preferred) */
+  --color-line: oklch(28% 0.014 270);
+
+  /* Fonts */
+  --font-sans: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+
+  /* Spacing — 4pt scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-display: clamp(2rem, 4vw + 1rem, 3.25rem);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+
+  /* Easing + duration */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
+
+  /* Rules */
+  --rule-hairline: 1px solid var(--color-line);
+
+  /* Bloom backgrounds (atmospheric allowance: up to two fixed blooms) */
+  --bloom-1: radial-gradient(
+    60% 50% at 18% 12%,
+    oklch(70% 0.16 285 / 0.18) 0%,
+    transparent 70%
+  );
+  --bloom-2: radial-gradient(
+    50% 45% at 88% 8%,
+    oklch(62% 0.20 300 / 0.12) 0%,
+    transparent 65%
+  );
+}
+
+* {
+  border-color: var(--color-line);
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-paper);
+  background-image: var(--bloom-1), var(--bloom-2);
+  background-attachment: fixed;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+/* Focus ring — instant, never animated */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-paper-4) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-paper-4);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

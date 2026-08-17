@@ -1,0 +1,79 @@
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: var(--color-paper);
+    --foreground: var(--color-ink);
+  }
+}
+
+@layer utilities {
+  .glass {
+    background: oklch(20% 0.014 270 / 0.72);
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .grain {
+    position: relative;
+  }
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.025;
+    background-image: radial-gradient(var(--color-ink) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--color-paper-3);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      oklch(100% 0 0 / 0.05),
+      transparent
+    );
+    animation: shimmer 1.6s var(--ease-in-out) infinite;
+  }
+}
+
+/* View Transitions API — smooth crossfade between routes when supported.
+   The template.tsx wraps every route in [view-transition-name: app-page].
+   @supports gates this so unsupported browsers just swap normally. */
+@supports (view-transition-name: none) {
+  ::view-transition-old(app-page),
+  ::view-transition-new(app-page) {
+    animation-duration: 180ms;
+    animation-timing-function: var(--ease-out);
+  }
+  ::view-transition-old(app-page) {
+    animation-name: vt-fade-out;
+  }
+  ::view-transition-new(app-page) {
+    animation-name: vt-fade-in;
+  }
+}
+
+@keyframes vt-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
