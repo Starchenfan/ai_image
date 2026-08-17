@@ -5,6 +5,7 @@
  */
 import { db } from "./db";
 import { getAdapter } from "./adapters";
+import { persistGeneratedImages } from "./image-storage";
 import type { GenerateTask, GenerateParams } from "./types";
 import { uid } from "./cn";
 
@@ -77,12 +78,13 @@ async function runTask(taskId: string, params: GenerateParams): Promise<void> {
 
     const adapter = getAdapter(params.service.adapterType);
     const result = await adapter.generate(params);
+    const images = await persistGeneratedImages(task.id, result.images);
 
     patch({
       status: "completed",
       progress: 100,
       stage: "完成",
-      images: result.images,
+      images,
       completedAt: Date.now(),
       durationMs: Date.now() - (task.startedAt ?? Date.now()),
     });
