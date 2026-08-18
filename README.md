@@ -113,8 +113,8 @@ studio/
 ## 当前实现说明
 
 - 当前数据层是服务端进程内存中的模拟数据库。
-- 服务、模型、任务、历史记录和 API Key 会在服务重启后重置。
-- 配置 MySQL 后，生成图片会保存到 `public/generated-images/`，图片元数据会写入 `generated_images` 表。
+- 服务、模型、运行中的任务和 API Key 仍保存在进程内存中，服务重启后会重置。
+- 配置 MySQL 后，生成图片二进制、Prompt、模型信息和历史元数据会写入 `generated_images` 表，重启后仍可查看历史。
 - 当前任务执行器是进程内实现，不适合多实例部署。
 - 部分非 OpenAI 适配器目前使用模拟图片结果。
 - 正式部署时应将数据层替换为持久化数据库，并使用独立任务队列。
@@ -144,7 +144,11 @@ MYSQL_USER=root
 MYSQL_PASSWORD=你的密码
 ```
 
-配置完成后重启开发服务器。新生成的图片文件保存在 `public/generated-images/`，数据库记录保存在 `ai.generated_images`。该目录已加入 `.gitignore`，不会提交生成图片。
+配置完成后重启开发服务器。应用会自动兼容并补齐现有 `generated_images` 表的字段。图片二进制保存在 `image_data` 字段，历史页面通过 `/api/images/[id]` 从数据库读取图片。新图片不再额外写入本地目录，避免重复占用空间；已有的 `public/generated-images/` 文件不会自动删除。
+
+新生成的静态图片会在写入前尝试转换为高质量 WebP。默认质量为 `90`，可以通过 `IMAGE_STORAGE_WEBP_QUALITY=1-100` 调整；压缩后节省不足 5% 时保留原格式，GIF 和 SVG 不转换。
+
+大尺寸图片写入失败时，请确认 MySQL 的 `max_allowed_packet` 足够大，例如设置为 `64M` 或更高。
 
 ## Git 忽略规则
 

@@ -11,13 +11,17 @@ import { Button } from "@/components/ui/button";
 
 type ExploreItem = {
   id: string;
+  taskId: string;
   prompt: string;
+  imageUrl: string;
   model: string;
   category: string;
   author: string;
   likes: number;
   aspect: string;
-  hue: number;
+  width: number;
+  height: number;
+  createdAt: number;
 };
 
 async function fetchExplore(cat: string) {
@@ -42,6 +46,8 @@ export default function ExplorePage() {
   const { data } = useQuery({
     queryKey: ["explore", cat],
     queryFn: () => fetchExplore(cat),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const items = data?.items ?? [];
@@ -111,16 +117,13 @@ export default function ExplorePage() {
               className="relative w-full overflow-hidden"
               style={{ paddingTop: aspectToPadding(item.aspect) }}
             >
-              {/* gradient block stands in for generated art */}
-              <div
-                className="absolute inset-0 transition-transform duration-500 ease-[var(--ease-out)] group-hover:scale-105"
-                style={{
-                  background: `radial-gradient(circle at 30% 25%, hsl(${item.hue}, 70%, 45%), hsl(${(item.hue + 40) % 360}, 60%, 28%) 55%, hsl(${(item.hue + 200) % 360}, 50%, 12%))`,
-                }}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={item.imageUrl}
+                alt={item.prompt.slice(0, 80)}
+                loading="lazy"
+                className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 ease-[var(--ease-out)] group-hover:scale-[1.03]"
               />
-              <div className="absolute inset-0 flex items-center justify-center opacity-30">
-                <Sparkles className="h-8 w-8 text-white/40" />
-              </div>
 
               {/* hover overlay */}
               <div className="absolute inset-0 flex flex-col justify-between bg-gradient-to-t from-black/80 via-black/0 to-black/0 p-2.5 opacity-0 transition-opacity duration-[var(--dur-base)] ease-[var(--ease-out)] group-hover:opacity-100">

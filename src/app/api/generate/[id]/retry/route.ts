@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { enqueueTask } from "@/lib/task-runner";
 import type { HistoryItem } from "@/lib/types";
+import { getPersistedHistoryItem } from "@/lib/image-storage";
 
 // POST /api/generate/:id/retry  — retry from a history item
 export async function POST(
   _req: Request,
   { params }: { params: { id: string } }
 ) {
-  const item: HistoryItem | undefined = db.history.find((h) => h.id === params.id);
+  const item: HistoryItem | undefined =
+    (await getPersistedHistoryItem(params.id)) ?? db.history.find((h) => h.id === params.id);
   if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const service = db.services.find(

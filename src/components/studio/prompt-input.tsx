@@ -154,7 +154,7 @@ export function PromptInput() {
         value={prompt}
         onChange={(e) => set("prompt", e.target.value)}
         placeholder="描述你想要的图片…  江南古典庭院，古风少女，水墨国风，电影光影"
-        className="min-h-[120px] resize-y"
+        className="min-h-[152px] resize-none rounded-lg bg-paper-2/80 px-3.5 py-3 text-[13px] leading-6 shadow-inner [scrollbar-gutter:stable] hover:bg-paper-3/55 focus-visible:bg-paper-3/65"
       />
 
       {/* quick enhance chips */}

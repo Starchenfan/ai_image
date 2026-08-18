@@ -78,15 +78,20 @@ async function runTask(taskId: string, params: GenerateParams): Promise<void> {
 
     const adapter = getAdapter(params.service.adapterType);
     const result = await adapter.generate(params);
-    const images = await persistGeneratedImages(task.id, result.images);
+    const completedAt = Date.now();
+    const durationMs = completedAt - (task.startedAt ?? completedAt);
+    const images = await persistGeneratedImages(
+      { ...task, completedAt, durationMs },
+      result.images
+    );
 
     patch({
       status: "completed",
       progress: 100,
       stage: "完成",
       images,
-      completedAt: Date.now(),
-      durationMs: Date.now() - (task.startedAt ?? Date.now()),
+      completedAt,
+      durationMs,
     });
 
     db.credits = Math.max(0, db.credits - task.costCredits);

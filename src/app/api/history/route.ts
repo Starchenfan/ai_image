@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getPersistedHistory } from "@/lib/image-storage";
 
 // GET /api/history?filter=all|today|favorite
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") ?? "all";
-  let items = db.history;
+  let items = (await getPersistedHistory()) ?? db.history;
   const now = Date.now();
   if (filter === "today") items = items.filter((i) => now - i.createdAt < 86_400_000);
   if (filter === "favorite") items = items.filter((i) => i.favorite);

@@ -1,11 +1,17 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import mysql, { type Pool } from "mysql2/promise";
-import type { GeneratedImage } from "./types";
+import mysql, {
+  type Pool,
+  type ResultSetHeader,
+  type RowDataPacket,
+} from "mysql2/promise";
+import sharp from "sharp";
+import type { GeneratedImage, GenerateTask, HistoryItem } from "./types";
 
-const globalForMysql = globalThis as unknown as { imageMysqlPool?: Pool };
+const globalForMysql = globalThis as unknown as {
+  imageMysqlPool?: Pool;
+  imageSchemaPromise?: Promise<void>;
+};
 
-function isConfigured() {
+export function isImageDatabaseConfigured() {
   return Boolean(process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
 }
 
@@ -19,20 +25,68 @@ function getPool() {
       database: process.env.MYSQL_DATABASE,
       waitForConnections: true,
       connectionLimit: 5,
+      maxIdle: 5,
     });
   }
   return globalForMysql.imageMysqlPool;
 }
 
-function extensionFor(mimeType: string) {
-  const extensions: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/gif": "gif",
-    "image/svg+xml": "svg",
-  };
-  return extensions[mimeType.toLowerCase()] || "bin";
+async function ensureSchema() {
+  if (!isImageDatabaseConfigured()) return;
+  if (!globalForMysql.imageSchemaPromise) {
+    globalForMysql.imageSchemaPromise = (async () => {
+      const pool = getPool();
+      await pool.execute(`CREATE TABLE IF NOT EXISTS generated_images (
+        id VARCHAR(64) PRIMARY KEY,
+        task_id VARCHAR(64) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        mime_type VARCHAR(100) NOT NULL,
+        width INT NOT NULL,
+        height INT NOT NULL,
+        seed BIGINT NULL,
+        image_data LONGBLOB NULL,
+        prompt TEXT NULL,
+        negative_prompt TEXT NULL,
+        model_name VARCHAR(255) NULL,
+        service_name VARCHAR(255) NULL,
+        aspect_ratio VARCHAR(32) NULL,
+        image_size VARCHAR(32) NULL,
+        parameters JSON NULL,
+        cost_credits INT NOT NULL DEFAULT 0,
+        duration_ms BIGINT NOT NULL DEFAULT 0,
+        favorite TINYINT(1) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_generated_images_task_id (task_id),
+        INDEX idx_generated_images_created_at (created_at)
+      )`);
+
+      const [columns] = await pool.query<RowDataPacket[]>("SHOW COLUMNS FROM generated_images");
+      const existing = new Set(columns.map((column) => String(column.Field)));
+      const additions: Record<string, string> = {
+        image_data: "LONGBLOB NULL",
+        prompt: "TEXT NULL",
+        negative_prompt: "TEXT NULL",
+        model_name: "VARCHAR(255) NULL",
+        service_name: "VARCHAR(255) NULL",
+        aspect_ratio: "VARCHAR(32) NULL",
+        image_size: "VARCHAR(32) NULL",
+        parameters: "JSON NULL",
+        cost_credits: "INT NOT NULL DEFAULT 0",
+        duration_ms: "BIGINT NOT NULL DEFAULT 0",
+        favorite: "TINYINT(1) NOT NULL DEFAULT 0",
+      };
+
+      for (const [column, definition] of Object.entries(additions)) {
+        if (!existing.has(column)) {
+          await pool.execute(`ALTER TABLE generated_images ADD COLUMN ${column} ${definition}`);
+        }
+      }
+    })().catch((error) => {
+      globalForMysql.imageSchemaPromise = undefined;
+      throw error;
+    });
+  }
+  await globalForMysql.imageSchemaPromise;
 }
 
 function decodeDataUrl(url: string) {
@@ -47,7 +101,6 @@ function decodeDataUrl(url: string) {
 
 async function readImage(url: string) {
   if (url.startsWith("data:")) return decodeDataUrl(url);
-
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Image download failed: ${response.status}`);
   return {
@@ -56,49 +109,219 @@ async function readImage(url: string) {
   };
 }
 
-/**
- * Saves generated images under public/generated-images and records their
- * public paths in MySQL. If MySQL is not configured, the original URLs remain.
- */
+function imageStorageQuality() {
+  const configured = Number(process.env.IMAGE_STORAGE_WEBP_QUALITY || 90);
+  return Number.isFinite(configured) ? Math.min(100, Math.max(1, configured)) : 90;
+}
+
+async function optimizeImageForStorage(data: Buffer, mimeType: string) {
+  if (mimeType === "image/gif" || mimeType === "image/svg+xml") {
+    return { data, mimeType };
+  }
+
+  try {
+    const optimized = await sharp(data, { animated: false })
+      .rotate()
+      .webp({
+        quality: imageStorageQuality(),
+        alphaQuality: 100,
+        effort: 4,
+        smartSubsample: true,
+      })
+      .toBuffer();
+
+    // Keep the source when WebP does not save at least 5%.
+    if (optimized.length >= data.length * 0.95) return { data, mimeType };
+    return { data: optimized, mimeType: "image/webp" };
+  } catch (error) {
+    console.warn("Image optimization failed; storing the source image:", error);
+    return { data, mimeType };
+  }
+}
+
 export async function persistGeneratedImages(
-  taskId: string,
+  task: GenerateTask,
   images: GeneratedImage[]
 ): Promise<GeneratedImage[]> {
-  if (!isConfigured()) return images;
+  if (!isImageDatabaseConfigured()) return images;
 
-  const outputDir = path.join(process.cwd(), "public", "generated-images");
-  await mkdir(outputDir, { recursive: true });
+  try {
+    await ensureSchema();
+  } catch (error) {
+    console.error("Failed to initialize generated_images:", error);
+    return images;
+  }
+
   const pool = getPool();
 
   return Promise.all(
     images.map(async (image) => {
       try {
-        const { data, mimeType } = await readImage(image.url);
-        const fileName = `${image.id}.${extensionFor(mimeType)}`;
-        const publicPath = `/generated-images/${fileName}`;
-        await writeFile(path.join(outputDir, fileName), data);
+        const source = await readImage(image.url);
+        const { data, mimeType } = await optimizeImageForStorage(
+          source.data,
+          source.mimeType
+        );
+        const publicPath = `/api/images/${image.id}`;
         await pool.execute(
-          `INSERT INTO generated_images
-            (id, task_id, file_path, mime_type, width, height, seed)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE
+          `INSERT INTO generated_images (
+            id, task_id, file_path, mime_type, width, height, seed, image_data,
+            prompt, negative_prompt, model_name, service_name, aspect_ratio,
+            image_size, parameters, cost_credits, duration_ms, favorite, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
             file_path = VALUES(file_path), mime_type = VALUES(mime_type),
-            width = VALUES(width), height = VALUES(height), seed = VALUES(seed)`,
+            width = VALUES(width), height = VALUES(height), seed = VALUES(seed),
+            image_data = VALUES(image_data), prompt = VALUES(prompt),
+            negative_prompt = VALUES(negative_prompt), model_name = VALUES(model_name),
+            service_name = VALUES(service_name), aspect_ratio = VALUES(aspect_ratio),
+            image_size = VALUES(image_size), parameters = VALUES(parameters),
+            cost_credits = VALUES(cost_credits), duration_ms = VALUES(duration_ms)`,
           [
             image.id,
-            taskId,
+            task.id,
             publicPath,
             mimeType,
             image.width,
             image.height,
             image.seed,
+            data,
+            task.request.prompt,
+            task.request.negativePrompt || null,
+            task.model?.displayName || "Unknown",
+            task.service?.name || "Unknown",
+            task.request.aspectRatio,
+            task.request.size,
+            JSON.stringify(task.request.parameters),
+            task.costCredits,
+            task.durationMs || 0,
+            task.favorite ? 1 : 0,
+            new Date(task.completedAt || Date.now()),
           ]
         );
-        return { ...image, url: publicPath };
+        return { ...image, url: `/api/images/${image.id}` };
       } catch (error) {
         console.error(`Failed to persist image ${image.id}:`, error);
         return image;
       }
     })
   );
+}
+
+type HistoryRow = RowDataPacket & {
+  id: string;
+  task_id: string;
+  file_path: string;
+  mime_type: string;
+  width: number;
+  height: number;
+  seed: number | string | null;
+  has_image_data: number;
+  prompt: string | null;
+  negative_prompt: string | null;
+  model_name: string | null;
+  service_name: string | null;
+  aspect_ratio: string | null;
+  image_size: string | null;
+  parameters: unknown;
+  cost_credits: number;
+  duration_ms: number | string;
+  favorite: number;
+  created_at: Date | string;
+};
+
+function parseParameters(value: unknown): HistoryItem["parameters"] {
+  if (!value) return {};
+  if (typeof value === "object" && !Buffer.isBuffer(value)) {
+    return value as HistoryItem["parameters"];
+  }
+  try {
+    return JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : String(value));
+  } catch {
+    return {};
+  }
+}
+
+export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
+  if (!isImageDatabaseConfigured()) return null;
+  try {
+    await ensureSchema();
+    const [rows] = await getPool().query<HistoryRow[]>(`SELECT
+      id, task_id, file_path, mime_type, width, height, seed,
+      image_data IS NOT NULL AS has_image_data, prompt, negative_prompt,
+      model_name, service_name, aspect_ratio, image_size, parameters,
+      cost_credits, duration_ms, favorite, created_at
+      FROM generated_images
+      ORDER BY created_at DESC, task_id, id`);
+
+    const grouped = new Map<string, HistoryItem>();
+    for (const row of rows) {
+      const createdAt = new Date(row.created_at).getTime();
+      const item = grouped.get(row.task_id) || {
+        id: row.task_id,
+        prompt: row.prompt || "",
+        negativePrompt: row.negative_prompt || undefined,
+        modelName: row.model_name || "Unknown",
+        serviceName: row.service_name || "Unknown",
+        aspectRatio: row.aspect_ratio || "1:1",
+        size: row.image_size || `${row.width}x${row.height}`,
+        count: 0,
+        images: [],
+        costCredits: Number(row.cost_credits || 0),
+        durationMs: Number(row.duration_ms || 0),
+        createdAt: Number.isNaN(createdAt) ? Date.now() : createdAt,
+        favorite: Boolean(row.favorite),
+        parameters: parseParameters(row.parameters),
+      };
+      item.images.push({
+        id: row.id,
+        url: row.has_image_data ? `/api/images/${row.id}` : row.file_path,
+        width: row.width,
+        height: row.height,
+        seed: Number(row.seed ?? -1),
+      });
+      item.count = item.images.length;
+      grouped.set(row.task_id, item);
+    }
+    return [...grouped.values()];
+  } catch (error) {
+    console.error("Failed to read generated image history:", error);
+    return null;
+  }
+}
+
+export async function getPersistedHistoryItem(id: string) {
+  return (await getPersistedHistory())?.find((item) => item.id === id);
+}
+
+export async function setPersistedFavorite(taskId: string, favorite: boolean) {
+  if (!isImageDatabaseConfigured()) return false;
+  await ensureSchema();
+  const [result] = await getPool().execute<ResultSetHeader>(
+    "UPDATE generated_images SET favorite = ? WHERE task_id = ?",
+    [favorite ? 1 : 0, taskId]
+  );
+  return result.affectedRows > 0;
+}
+
+export async function deletePersistedHistory(taskId: string) {
+  if (!isImageDatabaseConfigured()) return false;
+  await ensureSchema();
+  const [result] = await getPool().execute<ResultSetHeader>(
+    "DELETE FROM generated_images WHERE task_id = ?",
+    [taskId]
+  );
+  return result.affectedRows > 0;
+}
+
+export async function getPersistedImage(id: string) {
+  if (!isImageDatabaseConfigured()) return null;
+  await ensureSchema();
+  const [rows] = await getPool().query<RowDataPacket[]>(
+    "SELECT image_data, mime_type FROM generated_images WHERE id = ? LIMIT 1",
+    [id]
+  );
+  const row = rows[0] as { image_data?: Buffer; mime_type?: string } | undefined;
+  if (!row?.image_data) return null;
+  return { data: row.image_data, mimeType: row.mime_type || "image/png" };
 }
