@@ -90,6 +90,24 @@ export interface GenerateRequest {
   size: string;
   seed: number; // -1 = random
   parameters: Record<string, number | string | boolean>;
+  /** Base64 data URL of a reference image for image-to-image. */
+  referenceImage?: string;
+}
+
+/** A saved generation recipe — full parameter set reusable in one click. */
+export interface Preset {
+  id: string;
+  name: string;
+  serviceId: string;
+  modelId: string;
+  prompt?: string;
+  negativePrompt?: string;
+  count: number;
+  aspectRatio: string;
+  size: string;
+  seed: number;
+  parameters: Record<string, number | string | boolean>;
+  createdAt: number;
 }
 
 export type TaskStatus =
@@ -161,6 +179,8 @@ export interface GenerateParams {
   size: string;
   seed: number;
   parameters: Record<string, number | string | boolean>;
+  /** Base64 data URL of a reference image for image-to-image. */
+  referenceImage?: string;
   /** Real API key — injected server-side, never stored on the task / never serialized to client. */
   apiKey?: string;
 }

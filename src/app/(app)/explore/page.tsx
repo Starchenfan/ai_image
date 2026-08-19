@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Heart, Copy, Sparkles, TrendingUp } from "lucide-react";
+import { Heart, Copy, Images, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStudio } from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
@@ -74,12 +74,12 @@ export default function ExplorePage() {
             <TrendingUp className="h-4.5 w-4.5 text-accent" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold text-ink">探索社区</h1>
+            <h1 className="font-display text-lg font-semibold text-ink">探索社区</h1>
             <p className="text-xs text-ink-3">发现精彩作品，一键复用 Prompt</p>
           </div>
         </div>
         <Badge variant="outline" className="w-fit">
-          <Sparkles className="h-3 w-3 text-accent" />
+          <Images className="h-3 w-3 text-accent" />
           {items.length} 作品
         </Badge>
       </header>

@@ -2,16 +2,19 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ImagePlus, Sparkles } from "lucide-react";
+import { ImagePlus, Layers } from "lucide-react";
 import { useStudio } from "@/lib/store";
 import { ServiceSelect } from "@/components/studio/service-select";
 import { ModelSelect } from "@/components/studio/model-select";
 import { PromptInput } from "@/components/studio/prompt-input";
 import { ParamPanel } from "@/components/studio/param-panel";
 import { AdvancedParams } from "@/components/studio/dynamic-field";
+import { PresetBar } from "@/components/studio/preset-bar";
+import { ReferenceImageUpload } from "@/components/studio/reference-image";
 import { GenerateButton } from "@/components/studio/generate-button";
 import { TaskStatus } from "@/components/studio/task-status";
 import { ResultGrid } from "@/components/studio/result-grid";
+import { CompareBoard, type CompareEntry } from "@/components/studio/compare-board";
 import type { AiModel, GenerateTask } from "@/lib/types";
 
 async function fetchModel(id: string) {
@@ -25,7 +28,11 @@ export default function StudioPage() {
   const results = useStudio((s) => s.results);
   const set = useStudio((s) => s.set);
   const buildRequest = useStudio((s) => s.buildRequest);
+  const compareMode = useStudio((s) => s.compareMode);
+  const compareIds = useStudio((s) => s.compareIds);
+  const prompt = useStudio((s) => s.prompt);
   const [genError, setGenError] = useState<string | null>(null);
+  const [compareEntries, setCompareEntries] = useState<CompareEntry[] | null>(null);
 
   const { data: model } = useQuery({
     queryKey: ["model", modelId],
@@ -38,6 +45,37 @@ export default function StudioPage() {
     if (!req) return;
     setGenError(null);
     set("results", null);
+
+    // Compare mode — fan out one task per selected model, same prompt + params.
+    if (compareMode && compareIds.length >= 2) {
+      setCompareEntries(null);
+      set("activeTaskId", null);
+      try {
+        const modelsRes = await fetch(`/api/models?serviceId=${req.serviceId}`);
+        const modelsData = (await modelsRes.json()) as { models: AiModel[] };
+        const nameOf = new Map(modelsData.models.map((m) => [m.id, m.displayName]));
+        const entries: CompareEntry[] = [];
+        for (const id of compareIds) {
+          const r = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...req, modelId: id }),
+          });
+          if (!r.ok) {
+            const err = (await r.json()) as { error?: string };
+            throw new Error(`${nameOf.get(id) ?? id}: ${err.error || r.status}`);
+          }
+          const d = (await r.json()) as { task: GenerateTask };
+          entries.push({ modelName: nameOf.get(id) ?? id, taskId: d.task.id });
+        }
+        setCompareEntries(entries);
+      } catch (e) {
+        setGenError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+
+    // Single model.
     try {
       const r = await fetch("/api/generate", {
         method: "POST",
@@ -89,7 +127,11 @@ export default function StudioPage() {
             <Divider />
             <PromptInput />
             <Divider />
+            <ReferenceImageUpload />
+            <Divider />
             <ParamPanel />
+            <Divider />
+            <PresetBar />
             {model && model.parameters.length > 0 && (
               <>
                 <Divider />
@@ -111,7 +153,9 @@ export default function StudioPage() {
           </div>
         )}
 
-        {activeTaskId ? (
+        {compareEntries ? (
+          <CompareBoard entries={compareEntries} prompt={prompt} />
+        ) : activeTaskId ? (
           <TaskStatus
             taskId={activeTaskId}
             onDone={handleDone}
@@ -146,11 +190,8 @@ function Divider() {
 function EmptyState() {
   return (
     <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
-      <div className="relative">
-        <div className="absolute inset-0 rounded-full bg-accent/15 blur-2xl animate-pulse-soft" />
-        <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-line bg-paper-3">
-          <ImagePlus className="h-7 w-7 text-ink-3" />
-        </div>
+      <div className="flex h-16 w-16 items-center justify-center rounded-md border border-line bg-paper-2">
+        <ImagePlus className="h-7 w-7 text-ink-3" />
       </div>
       <div className="space-y-1">
         <p className="text-sm font-medium text-ink-2">画布等待你的想法</p>
@@ -159,7 +200,7 @@ function EmptyState() {
         </p>
       </div>
       <div className="flex items-center gap-1.5 rounded-full border border-line bg-paper-3/40 px-3 py-1 text-xs text-ink-3">
-        <Sparkles className="h-3 w-3 text-accent" />
+        <Layers className="h-3 w-3 text-accent" />
         支持 多服务 + 多模型 + 动态参数 Schema
       </div>
     </div>

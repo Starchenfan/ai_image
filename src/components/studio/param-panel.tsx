@@ -76,17 +76,22 @@ export function ParamPanel() {
                 aria-pressed={active}
                 className={cn(
                   "flex flex-col items-center gap-1 rounded-md border border-line bg-paper-3/40 py-2 transition-[background-color,border-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-paper-3 active:scale-95",
-                  active && "border-accent/60 bg-accent/5"
+                  active && "border-accent bg-accent/10"
                 )}
               >
                 <span
                   className={cn(
                     "block rounded-sm border transition-[background-color,border-color] duration-[var(--dur-fast)]",
-                    active ? "border-accent bg-accent/20" : "border-ink-3"
+                    active ? "border-accent bg-accent" : "border-ink-3"
                   )}
                   style={{ width: bw, height: bh }}
                 />
-                <span className={cn("text-xs", active ? "text-ink" : "text-ink-3")}>
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    active ? "text-accent" : "text-ink-3"
+                  )}
+                >
                   {r.v}
                 </span>
               </button>

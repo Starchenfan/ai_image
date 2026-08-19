@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useStudio } from "@/lib/store";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Wand2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Coins } from "lucide-react";
 import type { AiModel } from "@/lib/types";
@@ -43,7 +43,7 @@ export function GenerateButton({ onGenerate }: { onGenerate: () => void }) {
           </>
         ) : (
           <>
-            <Sparkles className="h-4 w-4" />
+            <Wand2 className="h-4 w-4" />
             生成图片
           </>
         )}

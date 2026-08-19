@@ -115,7 +115,7 @@ export default function ServiceDetailPage({
             </Button>
           </Link>
           <div>
-            <h1 className="text-lg font-semibold text-ink">
+            <h1 className="font-display text-lg font-semibold text-ink">
               {service?.name ?? "加载中…"}
             </h1>
             <p className="font-mono text-[10px] text-ink-3">

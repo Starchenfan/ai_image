@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { GenerateRequest, GenerateTask } from "@/lib/types";
+import type { GenerateRequest, GenerateTask, Preset } from "@/lib/types";
 
 interface StudioState {
   // current selection (mirrors the generate form)
@@ -17,6 +17,11 @@ interface StudioState {
   parameters: Record<string, number | string | boolean>;
   showNegative: boolean;
   activeTaskId: string | null;
+  // compare mode — A/B the same prompt across several models
+  compareMode: boolean;
+  compareIds: string[];
+  // image-to-image reference (base64 data URL)
+  referenceImage: string | null;
   // last results for the grid
   results: GenerateTask | null;
 
@@ -26,6 +31,8 @@ interface StudioState {
   ) => void;
   resetParams: (params: Record<string, number | string | boolean>) => void;
   buildRequest: () => GenerateRequest | null;
+  toggleCompare: (id: string) => void;
+  applyPreset: (p: Preset) => void;
 }
 
 export const useStudio = create<StudioState>((set, get) => ({
@@ -41,6 +48,9 @@ export const useStudio = create<StudioState>((set, get) => ({
   parameters: {},
   showNegative: false,
   activeTaskId: null,
+  compareMode: false,
+  compareIds: [],
+  referenceImage: null,
   results: null,
 
   set: (k, v) => set({ [k]: v } as Pick<StudioState, typeof k>),
@@ -60,7 +70,28 @@ export const useStudio = create<StudioState>((set, get) => ({
       size: s.size,
       seed: s.seed,
       parameters: s.parameters,
+      referenceImage: s.referenceImage || undefined,
     };
+  },
+
+  toggleCompare: (id) => {
+    const cur = get().compareIds;
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    set({ compareIds: next });
+  },
+
+  applyPreset: (p) => {
+    set({
+      serviceId: p.serviceId,
+      modelId: p.modelId,
+      prompt: p.prompt ?? get().prompt,
+      negativePrompt: p.negativePrompt ?? "",
+      count: p.count,
+      aspectRatio: p.aspectRatio,
+      size: p.size,
+      seed: p.seed,
+      parameters: p.parameters,
+    });
   },
 }));
 

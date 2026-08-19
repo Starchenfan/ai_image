@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Star, Clock, Coins } from "lucide-react";
+import { Search, Star, Clock, Coins, Check } from "lucide-react";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import type { AiModel } from "@/lib/types";
 
 async function fetchModels(serviceId: string) {
@@ -18,6 +19,9 @@ export function ModelSelect() {
   const serviceId = useStudio((s) => s.serviceId);
   const modelId = useStudio((s) => s.modelId);
   const set = useStudio((s) => s.set);
+  const compareMode = useStudio((s) => s.compareMode);
+  const compareIds = useStudio((s) => s.compareIds);
+  const toggleCompare = useStudio((s) => s.toggleCompare);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
 
@@ -45,11 +49,6 @@ export function ModelSelect() {
       if (p.default !== undefined) defaults[p.key] = p.default;
     });
     set("parameters", defaults);
-    // sync aspect/size/count to model-supported defaults if current invalid.
-    // For size, prefer a 16:9 (landscape) high-res option when the current
-    // ratio is 16:9, since the default store ratio is 16:9 — keeps the first
-    // render showing a sensible high-res landscape size instead of the list's
-    // first (often portrait/odd) entry.
     const curRatio = useStudio.getState().aspectRatio;
     if (!m.supportedAspectRatios.includes(curRatio)) {
       set("aspectRatio", m.supportedAspectRatios.includes("16:9") ? "16:9" : m.supportedAspectRatios[0]);
@@ -108,10 +107,23 @@ export function ModelSelect() {
 
   return (
     <section className="space-y-2">
-      <h3 className="px-1 text-xs font-medium uppercase tracking-wider text-ink-3">模型</h3>
+      <div className="flex items-center justify-between px-1">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-ink-3">模型</h3>
+        <label className="flex items-center gap-1.5 text-[10px] text-ink-3">
+          对比
+          <Switch
+            checked={compareMode}
+            onCheckedChange={(v) => {
+              set("compareMode", v);
+              if (v) setOpen(true);
+              else set("compareIds", []);
+            }}
+          />
+        </label>
+      </div>
 
-      {/* current model card */}
-      {current && (
+      {/* current model card (single-select mode only) */}
+      {!compareMode && current && (
         <button
           onClick={() => setOpen((o) => !o)}
           className="w-full rounded-md border border-line bg-paper-3/40 p-3 text-left transition-[background-color,border-color] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:bg-paper-3 hover:border-[color:var(--color-line)]"
@@ -147,7 +159,7 @@ export function ModelSelect() {
       )}
 
       {/* search + list */}
-      {open && (
+      {(open || compareMode) && (
         <div className="space-y-1.5 animate-fade-in">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-3" />
@@ -159,28 +171,64 @@ export function ModelSelect() {
               className="pl-8"
             />
           </div>
-          {filtered.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => {
-                set("modelId", m.id);
-                setOpen(false);
-              }}
-              className={cn(
-                "w-full rounded-md border border-transparent p-2.5 text-left transition-[background-color,border-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:border-line hover:bg-paper-3 active:scale-[0.98]",
-                m.id === modelId && "border-accent/40 bg-accent/5"
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-ink">{m.displayName}</span>
-                <Badge variant="default">
-                  <Coins className="mr-1 h-3 w-3" />
-                  {m.priceCredits}
-                </Badge>
-              </div>
-              <p className="mt-0.5 line-clamp-1 text-xs text-ink-3">{m.description}</p>
-            </button>
-          ))}
+          {compareMode && (
+            <p className="px-1 text-[10px] text-accent">
+              {compareIds.length > 0
+                ? `已选 ${compareIds.length} 个模型进行对比`
+                : "勾选至少 2 个模型，用同一 Prompt 对比生成"}
+            </p>
+          )}
+          {filtered.map((m) => {
+            const isChecked = compareMode && compareIds.includes(m.id);
+            const isActive = m.id === modelId;
+            return (
+              <button
+                key={m.id}
+                onClick={() => {
+                  if (compareMode) toggleCompare(m.id);
+                  else {
+                    set("modelId", m.id);
+                    setOpen(false);
+                  }
+                }}
+                className={cn(
+                  "w-full rounded-md border p-2.5 text-left transition-[background-color,border-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:border-line hover:bg-paper-3 active:scale-[0.98]",
+                  compareMode
+                    ? isChecked
+                      ? "border-accent/60 bg-accent/5"
+                      : "border-transparent"
+                    : isActive
+                      ? "border-accent/40 bg-accent/5"
+                      : "border-transparent"
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {compareMode && (
+                      <span
+                        className={cn(
+                          "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                          isChecked
+                            ? "border-accent bg-accent text-accent-ink"
+                            : "border-line"
+                        )}
+                      >
+                        {isChecked && <Check className="h-3 w-3" />}
+                      </span>
+                    )}
+                    <span className="truncate text-sm font-medium text-ink">
+                      {m.displayName}
+                    </span>
+                  </div>
+                  <Badge variant="default">
+                    <Coins className="mr-1 h-3 w-3" />
+                    {m.priceCredits}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 line-clamp-1 text-xs text-ink-3">{m.description}</p>
+              </button>
+            );
+          })}
           {filtered.length === 0 && (
             <p className="px-2 py-3 text-center text-xs text-ink-3">无匹配模型</p>
           )}

@@ -87,7 +87,7 @@ export default function HistoryPage() {
             <HistoryIcon className="h-4.5 w-4.5 text-accent" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold text-ink">生成历史</h1>
+            <h1 className="font-display text-lg font-semibold text-ink">生成历史</h1>
             <p className="text-xs text-ink-3">查看、复用、收藏过往的生成结果</p>
           </div>
         </div>

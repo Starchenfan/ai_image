@@ -65,14 +65,18 @@ class OpenAICompatAdapter implements ImageProvider {
   readonly adapterType: AdapterType = "openai";
 
   async generate(params: GenerateParams): Promise<GenerateProviderResult> {
-    const { service, model, prompt, count, size, apiKey, negativePrompt, parameters } = params;
+    const { service, model, prompt, count, size, apiKey, parameters } = params;
 
     // No real key → mock so the UI is still demonstrable end-to-end.
     if (!apiKey) {
       return mockGenerate(params, { speedMul: 1, failRate: 0.04, baseMs: 4000 });
     }
 
-    const url = `${service.baseUrl.replace(/\/$/, "")}/images/generations`;
+    // Image-to-image — a reference image was supplied → images/edits.
+    if (params.referenceImage) {
+      return this.edit(params);
+    }
+
     const body: Record<string, unknown> = {
       model: model.modelId,
       prompt,
@@ -88,10 +92,50 @@ class OpenAICompatAdapter implements ImageProvider {
       if (known && body[k] === undefined) body[k] = v;
     }
 
-    // Provider relays (TokenRhythm/qwen via ALB) intermittently throw 502/503/
-    // 504 or time out under load. Retry transient faults a few times with
-    // backoff so a flaky upstream doesn't surface as a hard failure.
-    // 4xx (except 429) is a real client error — never retried.
+    const data = await this.postJson(
+      `${service.baseUrl.replace(/\/$/, "")}/images/generations`,
+      body,
+      apiKey,
+      service.name
+    );
+    return this.toResult(data, params);
+  }
+
+  /** Image-to-image via POST /images/edits (JSON base64 body). */
+  private async edit(params: GenerateParams): Promise<GenerateProviderResult> {
+    const { service, model, prompt, count, size, apiKey, referenceImage } = params;
+    if (!apiKey) throw new Error(`${service.name} 未配置 API Key`);
+    const body: Record<string, unknown> = {
+      model: model.modelId,
+      prompt,
+      image: referenceImage,
+      n: Math.min(count, model.maxBatch || 1),
+      size,
+    };
+    try {
+      const data = await this.postJson(
+        `${service.baseUrl.replace(/\/$/, "")}/images/edits`,
+        body,
+        apiKey,
+        service.name
+      );
+      return this.toResult(data, params);
+    } catch (e) {
+      throw new Error(
+        `${service.name} 图生图失败（该中转站可能不支持 images/edits）: ${(e as Error).message}`
+      );
+    }
+  }
+
+  private async postJson(
+    url: string,
+    body: Record<string, unknown>,
+    apiKey: string,
+    serviceName: string
+  ): Promise<{ data?: Array<{ url?: string; b64_json?: string }> }> {
+    // Provider relays intermittently throw 502/503/504 or time out under load.
+    // Retry transient faults a few times with backoff; 4xx (except 429) is a
+    // real client error and is never retried.
     const TRANSIENT = new Set([429, 500, 502, 503, 504]);
     const MAX_ATTEMPTS = 3;
     let res: Response | null = null;
@@ -111,20 +155,25 @@ class OpenAICompatAdapter implements ImageProvider {
         lastDetail = await res.text().catch(() => "");
         if (!TRANSIENT.has(res.status) || attempt === MAX_ATTEMPTS) break;
       } catch (e) {
-        // Network error / timeout — transient unless last attempt.
         if (attempt === MAX_ATTEMPTS)
-          throw new Error(`${service.name} 网络错误: ${(e as Error).message}`);
+          throw new Error(`${serviceName} 网络错误: ${(e as Error).message}`);
       }
       await delay(800 * attempt); // 0.8s, 1.6s backoff
     }
 
     if (!res || !res.ok) {
       throw new Error(
-        `${service.name} 返回 ${res?.status ?? "网络错误"}: ${lastDetail.slice(0, 300) || res?.statusText || "无响应"}`
+        `${serviceName} 返回 ${res?.status ?? "网络错误"}: ${lastDetail.slice(0, 300) || res?.statusText || "无响应"}`
       );
     }
+    return (await res.json()) as { data?: Array<{ url?: string; b64_json?: string }> };
+  }
 
-    const data = (await res.json()) as { data?: Array<{ url?: string; b64_json?: string }> };
+  private toResult(
+    data: { data?: Array<{ url?: string; b64_json?: string }> },
+    params: GenerateParams
+  ): GenerateProviderResult {
+    const { prompt, size } = params;
     const out: GeneratedImage[] = (data.data ?? []).map((d, i) => {
       const [w, h] = parseSize(size);
       const src =
@@ -143,8 +192,7 @@ class OpenAICompatAdapter implements ImageProvider {
       };
     });
 
-    if (out.length === 0) throw new Error(`${service.name} 未返回图片`);
-
+    if (out.length === 0) throw new Error(`${params.service.name} 未返回图片`);
     return { images: out };
   }
 }

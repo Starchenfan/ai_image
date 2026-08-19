@@ -1,39 +1,40 @@
-/* Hallmark · macrostructure: Workbench · genre: atmospheric · theme: Midnight
- * tone: atmospheric/technical · anchor hue: violet (cool) · nav: N5 Floating pill · footer: Ft2 Inline
+/* Hallmark · macrostructure: Workbench · genre: editorial · theme: Atelier (custom warm-paper)
+ * tone: editorial/atelier · anchor hue: warm-oat (85) · accent: cinnabar-red (30) · nav: N5 Hairline bar · footer: Ft2 Inline
  * audience: creators/hobbyists · use: generate images via multi-service adapters · pre-emit critique: P5 H4 E5 S4 R5 V5
  */
 
 :root {
-  /* Midnight — dark canvas, two cool blooms, single violet accent. Geist sans + mono.
-     axes: paper-band=dark · display-style=geometric-sans · accent-hue=cool */
+  /* Atelier — warm paper canvas, ink-dark text, single cinnabar accent.
+     axes: paper-band=warm-light · display-style=serif-editorial · accent-hue=warm-red */
 
-  /* Paper scale — elevated cards replace hairlines */
-  --color-paper: oklch(16% 0.012 270);        /* canvas */
-  --color-paper-2: oklch(20% 0.014 270);      /* raised card */
-  --color-paper-3: oklch(24% 0.016 270);      /* hover card */
-  --color-paper-4: oklch(28% 0.018 270);      /* active / inset */
+  /* Paper scale — warm oat, light mode */
+  --color-paper: oklch(97.5% 0.010 85);   /* canvas */
+  --color-paper-2: oklch(94% 0.013 85);   /* raised card */
+  --color-paper-3: oklch(90% 0.015 85);   /* hover card */
+  --color-paper-4: oklch(85% 0.017 85);   /* active / inset */
 
-  /* Ink */
-  --color-ink: oklch(96% 0.006 270);
-  --color-ink-2: oklch(74% 0.012 270);
-  --color-ink-3: oklch(56% 0.014 270);
+  /* Ink — warm dark, never pure black */
+  --color-ink: oklch(24% 0.018 60);
+  --color-ink-2: oklch(42% 0.014 60);
+  --color-ink-3: oklch(56% 0.012 60);
 
-  /* Accent — single cool violet */
-  --color-accent: oklch(70% 0.16 285);
-  --color-accent-2: oklch(62% 0.20 300);      /* secondary pink-magenta, used sparingly */
-  --color-accent-ink: oklch(16% 0.012 270);
+  /* Accent — single cinnabar red (a vermilion seal) */
+  --color-accent: oklch(52% 0.16 30);
+  --color-accent-2: oklch(45% 0.09 175);  /* ink-green, used sparingly */
+  --color-accent-ink: oklch(97.5% 0.010 85);
 
   /* States */
-  --color-danger: oklch(68% 0.19 22);
-  --color-warn: oklch(80% 0.15 75);
-  --color-ok: oklch(72% 0.16 155);
+  --color-danger: oklch(55% 0.18 25);
+  --color-warn: oklch(62% 0.13 75);
+  --color-ok: oklch(48% 0.11 150);
   --color-focus: var(--color-accent);
 
-  /* Lines (used rarely — elevated cards preferred) */
-  --color-line: oklch(28% 0.014 270);
+  /* Lines — warm grey hairline */
+  --color-line: oklch(83% 0.010 85);
 
-  /* Fonts */
+  /* Fonts — system serif display + Geist body + Geist Mono outlier */
   --font-sans: "Geist", system-ui, sans-serif;
+  --font-display: "Songti SC", "Noto Serif CJK SC", "Noto Serif SC", "SimSun", Georgia, "Times New Roman", serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
 
   /* Spacing — 4pt scale */
@@ -58,12 +59,12 @@
   --text-3xl: 1.875rem;
   --text-display: clamp(2rem, 4vw + 1rem, 3.25rem);
 
-  /* Radius */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-  --radius-2xl: 28px;
+  /* Radius — tighter for editorial */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
 
   /* Easing + duration */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -75,18 +76,6 @@
 
   /* Rules */
   --rule-hairline: 1px solid var(--color-line);
-
-  /* Bloom backgrounds (atmospheric allowance: up to two fixed blooms) */
-  --bloom-1: radial-gradient(
-    60% 50% at 18% 12%,
-    oklch(70% 0.16 285 / 0.18) 0%,
-    transparent 70%
-  );
-  --bloom-2: radial-gradient(
-    50% 45% at 88% 8%,
-    oklch(62% 0.20 300 / 0.12) 0%,
-    transparent 65%
-  );
 }
 
 * {
@@ -99,13 +88,11 @@ body {
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   background-color: var(--color-paper);
-  background-image: var(--bloom-1), var(--bloom-2);
-  background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

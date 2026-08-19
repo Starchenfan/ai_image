@@ -29,6 +29,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
@@ -40,9 +41,8 @@ const config: Config = {
         full: "9999px",
       },
       boxShadow: {
-        glow: "0 0 0 1px var(--color-accent), 0 8px 30px -8px var(--color-accent)",
-        soft: "0 1px 0 0 var(--color-line), 0 8px 24px -16px rgba(0,0,0,0.6)",
-        lift: "0 12px 40px -16px rgba(0,0,0,0.7)",
+        soft: "0 1px 0 0 var(--color-line), 0 8px 24px -18px oklch(24% 0.018 60 / 0.16)",
+        lift: "0 12px 40px -16px oklch(24% 0.018 60 / 0.20)",
       },
       keyframes: {
         "fade-in": {

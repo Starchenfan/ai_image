@@ -12,11 +12,6 @@
 }
 
 @layer utilities {
-  .glass {
-    background: oklch(20% 0.014 270 / 0.72);
-    backdrop-filter: blur(14px) saturate(1.2);
-    -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  }
   .text-balance {
     text-wrap: balance;
   }

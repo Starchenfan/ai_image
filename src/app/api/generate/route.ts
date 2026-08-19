@@ -30,6 +30,7 @@ export async function POST(req: Request) {
     size: body.size,
     seed: body.seed,
     parameters: body.parameters,
+    referenceImage: body.referenceImage,
     // Inject real key from server-side vault — never read from client.
     apiKey: db.apiKeys.get(service.id),
   });

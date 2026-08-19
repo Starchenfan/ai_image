@@ -180,9 +180,8 @@ export function TaskStatus({
   const idx = stageIndex(task.status);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-5 px-6 py-16 animate-fade-in">
-      <div className="relative flex h-16 w-16 items-center justify-center">
-        <div className="absolute inset-0 rounded-full bg-accent/15 blur-xl animate-pulse-soft" />
-        <Loader2 className="relative h-7 w-7 animate-spin text-accent" />
+      <div className="flex h-16 w-16 items-center justify-center rounded-full border border-line bg-paper-2">
+        <Loader2 className="h-7 w-7 animate-spin text-accent" />
       </div>
 
       <div className="text-center">

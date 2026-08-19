@@ -85,7 +85,7 @@ export default function AdminPage() {
             <Settings className="h-4.5 w-4.5 text-accent" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold text-ink">服务管理</h1>
+            <h1 className="font-display text-lg font-semibold text-ink">服务管理</h1>
             <p className="text-xs text-ink-3">
               接入新的 AI 图像服务 · 不写死任何 provider
             </p>

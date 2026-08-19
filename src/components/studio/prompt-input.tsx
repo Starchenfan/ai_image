@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Sparkles,
+  Wand2,
+  Palette,
+  User,
+  Mountain,
+  Sun,
   Eraser,
   History as HistoryIcon,
   LayoutGrid,
@@ -27,11 +31,11 @@ async function fetchTemplates() {
 }
 
 const QUICK = [
-  { label: "AI 润色", icon: Sparkles, tag: "优化" },
-  { label: "风格", icon: Sparkles, tag: "风格" },
-  { label: "人物", icon: Sparkles, tag: "人物" },
-  { label: "场景", icon: Sparkles, tag: "场景" },
-  { label: "光影", icon: Sparkles, tag: "光影" },
+  { label: "AI 润色", icon: Wand2, tag: "优化" },
+  { label: "风格", icon: Palette, tag: "风格" },
+  { label: "人物", icon: User, tag: "人物" },
+  { label: "场景", icon: Mountain, tag: "场景" },
+  { label: "光影", icon: Sun, tag: "光影" },
 ];
 
 const SUFFIX: Record<string, string> = {
