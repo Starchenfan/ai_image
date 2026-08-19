@@ -5,9 +5,9 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "AI Image Studio",
+  title: "绘界",
   description:
-    "Multi-service AI image generation workbench. Pick a model, write a prompt, ship an image.",
+    "绘界 · 多服务 AI 图像生成工作台。选模型、写提示词、出图。",
 };
 
 export default function RootLayout({

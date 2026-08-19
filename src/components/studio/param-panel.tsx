@@ -117,7 +117,7 @@ export function ParamPanel() {
                 aria-pressed={active}
                 className={cn(
                   "rounded-md border border-line bg-paper-3/40 px-2.5 py-1 font-mono text-xs transition-[background-color,border-color,color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-paper-3 active:scale-95",
-                  active ? "border-accent/60 bg-accent/5 text-ink" : "text-ink-2"
+                  active ? "border-accent bg-accent/10 text-accent" : "text-ink-2"
                 )}
               >
                 {s}
@@ -134,7 +134,7 @@ export function ParamPanel() {
             }}
             className={cn(
               "rounded-md border border-line bg-paper-3/40 px-2.5 py-1 font-mono text-xs text-ink-3 transition-[background-color,border-color,color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-paper-3 hover:text-ink active:scale-95",
-              !sizes.includes(size) && size && "border-accent/60 bg-accent/5 text-ink"
+              !sizes.includes(size) && size && "border-accent bg-accent/10 text-accent"
             )}
           >
             自定义
@@ -170,7 +170,7 @@ export function ParamPanel() {
                   aria-pressed={active}
                   className={cn(
                     "rounded-md border border-line bg-paper-3/40 py-1.5 text-sm font-medium transition-[background-color,border-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-paper-3 active:scale-95",
-                    active && "border-accent/60 bg-accent/5 text-ink"
+                    active && "border-accent bg-accent/10 text-accent"
                   )}
                 >
                   {c}

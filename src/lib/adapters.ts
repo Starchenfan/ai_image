@@ -83,10 +83,17 @@ class OpenAICompatAdapter implements ImageProvider {
       n: Math.min(count, model.maxBatch || 1),
       size,
     };
+    // Negative prompt — send only when the model opts in via
+    // capabilities.negativePrompt AND the user actually supplied one, so a
+    // strict relay never sees an unexpected key. Flip the capability flag to
+    // false on a model to opt that model out (e.g. a relay that 400s on it).
+    if (model.capabilities.negativePrompt && params.negativePrompt?.trim()) {
+      body.negative_prompt = params.negativePrompt.trim();
+    }
     // Forward schema-declared params the model explicitly maps to provider
     // fields. Many strict OpenAI-compat relays (TokenRhythm/qwen) reject ANY
     // unknown key with 400, so only send what the model's schema opts into —
-    // never free-form extras, and never negative_prompt (not an OpenAI field).
+    // never free-form extras.
     for (const [k, v] of Object.entries(parameters ?? {})) {
       const known = model.parameters.find((p) => p.key === k);
       if (known && body[k] === undefined) body[k] = v;
@@ -112,6 +119,9 @@ class OpenAICompatAdapter implements ImageProvider {
       n: Math.min(count, model.maxBatch || 1),
       size,
     };
+    if (model.capabilities.negativePrompt && params.negativePrompt?.trim()) {
+      body.negative_prompt = params.negativePrompt.trim();
+    }
     try {
       const data = await this.postJson(
         `${service.baseUrl.replace(/\/$/, "")}/images/edits`,

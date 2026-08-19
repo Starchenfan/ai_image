@@ -10,22 +10,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // OKLCH token refs (see globals.css :root)
-        paper: "var(--color-paper)",
-        "paper-2": "var(--color-paper-2)",
-        "paper-3": "var(--color-paper-3)",
-        "paper-4": "var(--color-paper-4)",
-        ink: "var(--color-ink)",
-        "ink-2": "var(--color-ink-2)",
-        "ink-3": "var(--color-ink-3)",
-        accent: "var(--color-accent)",
-        "accent-2": "var(--color-accent-2)",
-        "accent-ink": "var(--color-accent-ink)",
-        danger: "var(--color-danger)",
-        warn: "var(--color-warn)",
-        ok: "var(--color-ok)",
-        focus: "var(--color-focus)",
-        line: "var(--color-line)",
+        // OKLCH token refs (see globals.css :root). Wrapped in color-mix so
+        // Tailwind opacity modifiers (bg-accent/80 …) work with var() colors —
+        // plain var refs compute to transparent when a modifier is applied.
+        paper: "color-mix(in oklch, var(--color-paper) calc(<alpha-value> * 100%), transparent)",
+        "paper-2": "color-mix(in oklch, var(--color-paper-2) calc(<alpha-value> * 100%), transparent)",
+        "paper-3": "color-mix(in oklch, var(--color-paper-3) calc(<alpha-value> * 100%), transparent)",
+        "paper-4": "color-mix(in oklch, var(--color-paper-4) calc(<alpha-value> * 100%), transparent)",
+        ink: "color-mix(in oklch, var(--color-ink) calc(<alpha-value> * 100%), transparent)",
+        "ink-2": "color-mix(in oklch, var(--color-ink-2) calc(<alpha-value> * 100%), transparent)",
+        "ink-3": "color-mix(in oklch, var(--color-ink-3) calc(<alpha-value> * 100%), transparent)",
+        accent: "color-mix(in oklch, var(--color-accent) calc(<alpha-value> * 100%), transparent)",
+        "accent-2": "color-mix(in oklch, var(--color-accent-2) calc(<alpha-value> * 100%), transparent)",
+        "accent-ink": "color-mix(in oklch, var(--color-accent-ink) calc(<alpha-value> * 100%), transparent)",
+        danger: "color-mix(in oklch, var(--color-danger) calc(<alpha-value> * 100%), transparent)",
+        warn: "color-mix(in oklch, var(--color-warn) calc(<alpha-value> * 100%), transparent)",
+        ok: "color-mix(in oklch, var(--color-ok) calc(<alpha-value> * 100%), transparent)",
+        focus: "color-mix(in oklch, var(--color-focus) calc(<alpha-value> * 100%), transparent)",
+        line: "color-mix(in oklch, var(--color-line) calc(<alpha-value> * 100%), transparent)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
@@ -64,6 +66,10 @@ const config: Config = {
           from: { opacity: "0", transform: "scale(0.96)" },
           to: { opacity: "1", transform: "scale(1)" },
         },
+        "grow-y": {
+          from: { transform: "scaleY(0)" },
+          to: { transform: "scaleY(1)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 300ms var(--ease-out)",
@@ -71,6 +77,7 @@ const config: Config = {
         shimmer: "shimmer 1.6s var(--ease-in-out) infinite",
         "pulse-soft": "pulse-soft 2s var(--ease-in-out) infinite",
         "scale-in": "scale-in 200ms var(--ease-out)",
+        "grow-y": "grow-y 500ms var(--ease-out) both",
       },
       transitionTimingFunction: {
         out: "var(--ease-out)",

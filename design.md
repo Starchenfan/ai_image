@@ -1,4 +1,4 @@
-# Design — AI Image Studio
+# Design — 绘界
 
 A locked design system for this app. Every page redesign reads this file before
 emitting code. Do not regenerate per page — extend or amend this file when the
@@ -58,7 +58,7 @@ editorial
 - Content pages: typography only.
 
 ## What pages MUST share
-- The wordmark (Fraunces serif, "AI Image Studio" or a short mark).
+- The wordmark (Fraunces serif, "绘界" or a short mark).
 - The cinnabar accent and its placement (≤ 5% per viewport).
 - The display + body fonts.
 - The CTA voice (4px radius, solid fill primary).

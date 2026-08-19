@@ -66,7 +66,7 @@ export function TopNav() {
             <Aperture className="h-4 w-4" />
           </span>
           <span className="font-display text-base font-semibold tracking-tight text-ink">
-            AI Image Studio
+            绘界
           </span>
         </Link>
 

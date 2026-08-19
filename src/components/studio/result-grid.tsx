@@ -68,15 +68,23 @@ export function ResultGrid({ task }: { task: GenerateTask }) {
   return (
     <>
       <div className={cn("grid gap-3", cols)}>
-        {task.images.map((img, i) => (
+        {task.images.map((img, i) => {
+          // Fit the whole image in one viewport: the box width is the
+          // smaller of the grid column and (viewport height budget ×
+          // ratio), so tall/large images shrink instead of forcing the
+          // canvas to scroll. aspect-ratio keeps the original proportion.
+          const ratio = img.width && img.height ? img.width / img.height : 1;
+          const heightBudget =
+            task.images.length === 1
+              ? "(100dvh - 12rem)"
+              : "((100dvh - 13.5rem) / 2)";
+          return (
           <figure
             key={img.id}
-            className="group relative overflow-hidden rounded-lg border border-line bg-paper-3 animate-fade-up"
-            // Use the provider's real aspect ratio so the box doesn't snap
-            // from square to wide when the image decodes. Falls back to
-            // square when dimensions are absent.
+            className="group relative mx-auto overflow-hidden rounded-lg border border-line bg-paper-3 animate-fade-up"
             style={{
-              aspectRatio: img.width && img.height ? `${img.width} / ${img.height}` : "1 / 1",
+              aspectRatio: `${ratio}`,
+              width: `min(100%, calc(${heightBudget} * ${ratio}))`,
               animationDelay: `${i * 60}ms`,
             }}
           >
@@ -123,7 +131,8 @@ export function ResultGrid({ task }: { task: GenerateTask }) {
               </div>
             </figcaption>
           </figure>
-        ))}
+          );
+        })}
       </div>
 
       {viewerIdx !== null && (
