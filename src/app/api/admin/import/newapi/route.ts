@@ -22,11 +22,17 @@ import type { AiModel } from "@/lib/types";
 
 type ListedModel = { id: string; owned_by?: string };
 
+/** Users paste URLs from chat/docs with stray backticks, quotes or spaces —
+ *  strip them so the probe doesn't fail on a technically-invalid host. */
+function cleanBaseUrl(raw: string): string {
+  return raw.trim().replace(/[`'"　\s]+/g, "").replace(/\/+$/, "");
+}
+
 // GET /api/admin/import/newapi?baseUrl=...&apiKey=...
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const baseUrl = (url.searchParams.get("baseUrl") || "").replace(/\/$/, "");
-  const apiKey = url.searchParams.get("apiKey") || "";
+  const baseUrl = cleanBaseUrl(url.searchParams.get("baseUrl") || "");
+  const apiKey = (url.searchParams.get("apiKey") || "").trim();
 
   if (!baseUrl) {
     return NextResponse.json({ error: "baseUrl 必填" }, { status: 400 });
@@ -35,51 +41,85 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "apiKey 必填" }, { status: 400 });
   }
 
-  // Relay exposes GET {baseUrl}/models (OpenAI shape).
-  const listUrl = `${baseUrl}/models`;
-  let models: ListedModel[] = [];
-  try {
-    const res = await fetch(listUrl, {
-      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      signal: AbortSignal.timeout(15000) as any,
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      return NextResponse.json(
-        { error: `中转站返回 ${res.status}: ${detail.slice(0, 200) || res.statusText}` },
-        { status: 502 }
-      );
+  // NewAPI / one-api mount the OpenAI API under /v1 (e.g. {base}/v1/models),
+  // but users often paste the root URL. Probe /v1 first, then /models, and
+  // remember which base actually returns JSON so the service is stored with
+  // the right prefix — generation later calls {base}/images/generations.
+  const hasV1 = /\/v1\/?$/.test(baseUrl);
+  const candidates = hasV1
+    ? [{ apiBase: baseUrl, listUrl: `${baseUrl}/models` }]
+    : [
+        { apiBase: `${baseUrl}/v1`, listUrl: `${baseUrl}/v1/models` },
+        { apiBase: baseUrl, listUrl: `${baseUrl}/models` },
+      ];
+
+  for (const { apiBase, listUrl } of candidates) {
+    let models: ListedModel[] = [];
+    try {
+      const res = await fetch(listUrl, {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        signal: AbortSignal.timeout(15000) as any,
+      });
+      // HTML means we hit the relay's web dashboard (SPA), not its API — try
+      // the next candidate path.
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("json")) continue;
+
+      const data = (await res.json()) as { data?: ListedModel[]; error?: unknown };
+      // 401/403 = the endpoint exists but the key is rejected → definitive.
+      if (res.status === 401 || res.status === 403) {
+        return NextResponse.json(
+          { error: `中转站返回 ${res.status}: ${JSON.stringify(data).slice(0, 200)}` },
+          { status: 502 }
+        );
+      }
+      // Other non-ok JSON (404/500) = likely a wrong path → try next candidate.
+      if (!res.ok) continue;
+      models = data.data ?? [];
+
+      // Heuristic: relays often prefix/suffix image models. We can't know for
+      // sure which are image-capable without probing, so we return everything
+      // with a best-effort "likely image" flag for the common markers.
+      const IMAGE_MARKERS = [
+        "image", "dall", "flux", "sd", "stable", "midjourney", "mj",
+        "kolors", "wanx", "cogview", "qwen-image", "sensenova", "u1",
+        "seedream", "imagen", "ideogram", "recraft", "playground",
+      ];
+      const items = models.map((m) => {
+        const id = m.id.toLowerCase();
+        const likelyImage = IMAGE_MARKERS.some((mk) => id.includes(mk));
+        return { id: m.id, ownedBy: m.owned_by, likelyImage };
+      });
+
+      return NextResponse.json({
+        baseUrl: apiBase,
+        apiKeyMasked: maskKey(apiKey),
+        count: items.length,
+        items,
+      });
+    } catch (e) {
+      // Surface the real network cause — bare "fetch failed" tells the user nothing.
+      const err = e as Error & { cause?: { code?: string; message?: string } };
+      const code = err.cause?.code;
+      const hint =
+        code === "ENOTFOUND"
+          ? "域名无法解析（ENOTFOUND），请检查地址是否拼写正确、DNS 是否已生效"
+          : code === "ECONNREFUSED"
+          ? "连接被拒绝（ECONNREFUSED），请确认端口与服务是否开启"
+          : code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT"
+          ? "连接超时，请检查网络、防火墙，或该中转是否需走代理"
+          : code === "CERT_HAS_EXPIRED" || code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
+          ? "TLS 证书校验失败，请检查证书是否有效"
+          : err.message;
+      return NextResponse.json({ error: `连接失败: ${hint}` }, { status: 502 });
     }
-    const data = (await res.json()) as { data?: ListedModel[] };
-    models = data.data ?? [];
-  } catch (e) {
-    return NextResponse.json(
-      { error: `连接失败: ${(e as Error).message}` },
-      { status: 502 }
-    );
   }
 
-  // Heuristic: relays often prefix/suffix image models. We can't know for
-  // sure which are image-capable without probing, so we return everything
-  // with a best-effort "likely image" flag for the common markers.
-  const IMAGE_MARKERS = [
-    "image", "dall", "flux", "sd", "stable", "midjourney", "mj",
-    "kolors", "wanx", "cogview", "qwen-image", "sensenova", "u1",
-    "seedream", "imagen", "ideogram", "recraft", "playground",
-  ];
-  const items = models.map((m) => {
-    const id = m.id.toLowerCase();
-    const likelyImage = IMAGE_MARKERS.some((mk) => id.includes(mk));
-    return { id: m.id, ownedBy: m.owned_by, likelyImage };
-  });
-
-  return NextResponse.json({
-    baseUrl,
-    apiKeyMasked: maskKey(apiKey),
-    count: items.length,
-    items,
-  });
+  return NextResponse.json(
+    { error: "未找到 API 端点：/v1/models 与 /models 均未返回 JSON，可能不是 NewAPI / One-API 中转" },
+    { status: 502 }
+  );
 }
 
 // POST /api/admin/import/newapi  (bulk create service + selected models)
@@ -94,8 +134,9 @@ export async function POST(req: Request) {
     sizes?: string[];
   };
 
-  const baseUrl = body.baseUrl.replace(/\/$/, "");
-  if (!baseUrl || !body.apiKey || !body.modelIds?.length) {
+  const baseUrl = cleanBaseUrl(body.baseUrl);
+  const apiKey = (body.apiKey || "").trim();
+  if (!baseUrl || !apiKey || !body.modelIds?.length) {
     return NextResponse.json(
       { error: "baseUrl / apiKey / modelIds 必填" },
       { status: 400 }
@@ -108,7 +149,7 @@ export async function POST(req: Request) {
     name: body.name || "NewAPI 中转",
     adapterType: "openai" as const,
     baseUrl,
-    apiKeyMasked: maskKey(body.apiKey),
+    apiKeyMasked: maskKey(apiKey),
     status: "online" as const,
     latencyMs: 6000,
     recommended: false,
@@ -116,7 +157,7 @@ export async function POST(req: Request) {
     createdAt: new Date().toISOString().slice(0, 10),
   };
   db.services.push(svc);
-  db.apiKeys.set(serviceId, body.apiKey);
+  db.apiKeys.set(serviceId, apiKey);
 
   const sizes = body.sizes?.length
     ? body.sizes

@@ -19,6 +19,11 @@ import type {
 } from "./types";
 import { maskKey } from "./mask";
 import { defaultPromptTemplates } from "./seed";
+import { installProxyDispatcher } from "./proxy";
+
+// Make server-side fetch honor HTTP(S)_PROXY — installed once, before any
+// route handler issues an outbound call (db is imported by every route).
+installProxyDispatcher();
 
 type GlobalStore = {
   services: AiService[];
