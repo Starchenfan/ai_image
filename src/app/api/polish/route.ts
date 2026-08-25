@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import styleLibrary from "@/lib/style-library.md";
 
 // POST /api/polish
 // Runs the user's prompt through a chat model on the 基元律动 relay to enrich
@@ -14,7 +15,10 @@ import { db } from "@/lib/db";
 const POLISH_MODEL = "glm-5.2";
 const POLISH_SYSTEM =
   "你是 prompt 润色助手。把用户给的图像描述润色成更生动、细节丰富、适合 AI 绘画的 prompt。" +
-  "保持中文，只输出润色后的 prompt 一段话，不要分点、不要解释、不要加引号。";
+  "保持中文，只输出润色后的 prompt 一段话，不要分点、不要解释、不要加引号。" +
+  "润色时参考下方风格库中的模板、视觉风格、构图布局与避坑要点（仅借鉴风格与构图思路，" +
+  "不要把模板名称、案例编号或分点说明写进输出）：\n" +
+  styleLibrary;
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as { prompt?: string } | null;
