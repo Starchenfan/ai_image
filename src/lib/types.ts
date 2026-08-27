@@ -38,6 +38,9 @@ export interface ModelParameterSchema {
   group?: "basic" | "advanced" | "sampler" | "quality";
   /** hide behind "Advanced" toggle */
   advanced?: boolean;
+  /** Render no control — the field is declared so the adapter forwards it
+   * (e.g. `seed`), but the UI supplies it elsewhere. */
+  hidden?: boolean;
 }
 
 export interface ModelCapabilities {
@@ -46,6 +49,8 @@ export interface ModelCapabilities {
   inpainting: boolean;
   negativePrompt: boolean;
   variations: boolean;
+  /** How the provider's `size` string is ordered. Default "width_first". */
+  sizeFormat?: "width_first" | "height_first";
 }
 
 /** A model exposed by a service. Parameters are schema-driven, never hard-coded. */

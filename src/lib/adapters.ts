@@ -17,9 +17,10 @@ function hueFromPrompt(prompt: string): number {
   return h;
 }
 
-function parseSize(size: string): [number, number] {
-  const [w, h] = size.split("x").map(Number);
-  return [w || 1024, h || 1024];
+function parseSize(size: string, heightFirst = false): [number, number] {
+  const [a, b] = size.split("x").map(Number);
+  // Some providers (e.g. step-image-edit-2) document size as "height x width".
+  return heightFirst ? [b || 1024, a || 1024] : [a || 1024, b || 1024];
 }
 
 async function delay(ms: number) {
@@ -45,7 +46,7 @@ async function mockGenerate(
   params: GenerateParams,
   opts: { speedMul: number; failRate: number; baseMs: number }
 ): Promise<GenerateProviderResult> {
-  const [w, h] = parseSize(params.size);
+  const [w, h] = parseSize(params.size, params.model.capabilities.sizeFormat === "height_first");
   const hue = hueFromPrompt(params.prompt);
   await delay(opts.baseMs * opts.speedMul);
 
@@ -115,6 +116,28 @@ class OpenAICompatAdapter implements ImageProvider {
       const known = model.parameters.find((p) => p.key === k);
       if (known && body[k] === undefined) body[k] = v;
     }
+    // Seed — some providers accept an explicit generation seed. Opt in via the
+    // model schema (hidden entry) so strict relays never see an unexpected key.
+    // The UI supplies seed through the top-level field, but it may also arrive
+    // via the parameters record (preset / history reuse), so resolve both.
+    // NOTE: the schema loop above may have already copied parameters.seed (even
+    // -1) into body.seed — when the effective seed is "random" we must delete it,
+    // otherwise a stray -1 reaches the provider and 400s.
+    const seedParam = model.parameters.find((p) => p.key === "seed");
+    if (seedParam) {
+      const min = seedParam.min ?? 0;
+      const max = seedParam.max ?? 2147483647;
+      let seed: number | undefined = params.seed;
+      if (seed === -1 || seed === undefined || seed === null) {
+        const fromParams = parameters?.seed;
+        if (fromParams !== undefined && fromParams !== null) seed = Number(fromParams);
+      }
+      if (seed === -1 || seed === undefined || Number.isNaN(seed)) {
+        delete body.seed;
+      } else {
+        body.seed = Math.min(max, Math.max(min, Math.round(seed)));
+      }
+    }
 
     const url = `${service.baseUrl.replace(/\/$/, "")}/images/generations`;
     let data: { data?: Array<{ url?: string; b64_json?: string }> };
@@ -169,12 +192,16 @@ class OpenAICompatAdapter implements ImageProvider {
     // Provider relays intermittently throw 502/503/504 or time out under load.
     // Retry transient faults a few times with backoff; 4xx (except 429) is a
     // real client error and is never retried.
-    const TRANSIENT = new Set([429, 500, 502, 503, 504]);
+    const TRANSIENT = new Set([429, 500, 502, 503, 504, 524]);
     const MAX_ATTEMPTS = 3;
     let res: Response | null = null;
     let lastDetail = "";
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        // 90s client-side timeout — Aixoras sits behind Cloudflare which
+        // returns 524 after ~100s; abort just before that so we retry sooner
+        // instead of waiting out the full Cloudflare window.
+        const signal = AbortSignal.timeout(90_000);
         res = await fetch(url, {
           method: "POST",
           headers: {
@@ -183,6 +210,7 @@ class OpenAICompatAdapter implements ImageProvider {
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify(body),
+          signal,
         });
         if (res.ok) break;
         lastDetail = await res.text().catch(() => "");
@@ -208,7 +236,7 @@ class OpenAICompatAdapter implements ImageProvider {
   ): GenerateProviderResult {
     const { prompt, size } = params;
     const out: GeneratedImage[] = (data.data ?? []).map((d, i) => {
-      const [w, h] = parseSize(size);
+      const [w, h] = parseSize(size, params.model.capabilities.sizeFormat === "height_first");
       const src =
         d.url ??
         (d.b64_json

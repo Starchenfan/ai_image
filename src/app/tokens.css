@@ -1,41 +1,48 @@
-/* Hallmark · macrostructure: Workbench · genre: editorial · theme: Atelier (custom warm-paper)
- * tone: editorial/atelier · anchor hue: warm-oat (85) · accent: cinnabar-red (30) · nav: N5 Hairline bar · footer: Ft2 Inline
- * audience: creators/hobbyists · use: generate images via multi-service adapters · pre-emit critique: P5 H4 E5 S4 R5 V5
+/* Hallmark · macrostructure: Workbench · genre: web-app · theme: Cosmic Blue (gradient brand)
+ * tone: cosmic / technical · anchor: navy→blue→cyan gradient · accent: cyan seal
+ * nav: top App Bar with gradient brand mark · audience: AI image creators
+ * Brand source of truth: public/image/logo.svg (navy #0A194F → blue #2D6BFF → cyan #23D1FF)
+ *
+ * NOTE: token NAMES are kept for backward compatibility — only VALUES were
+ * reskinned from the old warm "Atelier" (cinnabar) system to this cool brand.
  */
 
 :root {
-  /* Atelier — warm paper canvas, ink-dark text, single cinnabar accent.
-     axes: paper-band=warm-light · display-style=serif-editorial · accent-hue=warm-red */
+  /* Brand — logo gradient stops (navy → blue → cyan) */
+  --brand-start: #0A194F;   /* deep navy */
+  --brand-mid: #2D6BFF;     /* electric blue */
+  --brand-end: #23D1FF;     /* cyan */
+  --brand-accent: #25D0FF;  /* seal cyan */
 
-  /* Paper scale — warm oat, light mode */
-  --color-paper: oklch(97.5% 0.010 85);   /* canvas */
-  --color-paper-2: oklch(94% 0.013 85);   /* raised card */
-  --color-paper-3: oklch(90% 0.015 85);   /* hover card */
-  --color-paper-4: oklch(85% 0.017 85);   /* active / inset */
+  /* Paper scale → cool light surface (was warm oat) */
+  --color-paper: #F4F7FB;     /* canvas */
+  --color-paper-2: #FFFFFF;   /* raised card */
+  --color-paper-3: #E9EFF7;   /* hover card */
+  --color-paper-4: #DCE5F0;   /* active / inset */
 
-  /* Ink — warm dark, never pure black */
-  --color-ink: oklch(24% 0.018 60);
-  --color-ink-2: oklch(42% 0.014 60);
-  --color-ink-3: oklch(56% 0.012 60);
+  /* Ink — navy-based, never pure black (was warm dark) */
+  --color-ink: #0A194F;
+  --color-ink-2: #4A5878;
+  --color-ink-3: #8896B0;
 
-  /* Accent — single cinnabar red (a vermilion seal) */
-  --color-accent: oklch(52% 0.16 30);
-  --color-accent-2: oklch(45% 0.09 175);  /* ink-green, used sparingly */
-  --color-accent-ink: oklch(97.5% 0.010 85);
+  /* Accent — cyan seal (was cinnabar red) */
+  --color-accent: #23D1FF;
+  --color-accent-2: #2D6BFF;  /* electric blue, secondary */
+  --color-accent-ink: #0A194F;
 
   /* States */
-  --color-danger: oklch(55% 0.18 25);
-  --color-warn: oklch(62% 0.13 75);
-  --color-ok: oklch(48% 0.11 150);
-  --color-focus: var(--color-accent);
+  --color-danger: #E5406A;
+  --color-warn: #E8A93C;
+  --color-ok: #22B573;
+  --color-focus: #23D1FF;
 
-  /* Lines — warm grey hairline */
-  --color-line: oklch(83% 0.010 85);
+  /* Lines — cool hairline (was warm grey) */
+  --color-line: #D9E1EC;
 
-  /* Fonts — system serif display + Geist body + Geist Mono outlier */
-  --font-sans: "Geist", system-ui, sans-serif;
-  --font-display: "Songti SC", "Noto Serif CJK SC", "Noto Serif SC", "SimSun", Georgia, "Times New Roman", serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
+  /* Fonts — Noto Serif SC display + Noto Sans SC body + Noto Sans Mono (was Songti/Geist) */
+  --font-sans: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif;
+  --font-display: "Noto Serif SC", "Songti SC", Georgia, "Times New Roman", serif;
+  --font-mono: "Noto Sans Mono", ui-monospace, "SFMono-Regular", monospace;
 
   /* Spacing — 4pt scale */
   --space-1: 4px;
@@ -59,12 +66,12 @@
   --text-3xl: 1.875rem;
   --text-display: clamp(2rem, 4vw + 1rem, 3.25rem);
 
-  /* Radius — tighter for editorial */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
+  /* Radius — soft & friendly (was tighter editorial) */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
 
   /* Easing + duration */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -76,6 +83,11 @@
 
   /* Rules */
   --rule-hairline: 1px solid var(--color-line);
+
+  /* Brand gradients — full 3-stop reserved for logo + hero;
+     2-stop navy→blue for buttons so they never compete with the mark */
+  --brand-gradient: linear-gradient(180deg, #0A194F 0%, #2D6BFF 55%, #23D1FF 100%);
+  --brand-gradient-btn: linear-gradient(180deg, #0A194F 0%, #2D6BFF 100%);
 }
 
 * {
@@ -100,8 +112,8 @@ body {
 }
 
 ::selection {
-  background: var(--color-accent);
-  color: var(--color-accent-ink);
+  background: var(--brand-mid);
+  color: #ffffff;
 }
 
 /* Focus ring — instant, never animated */

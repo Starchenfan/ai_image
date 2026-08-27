@@ -38,6 +38,7 @@ pnpm-debug.log*
 # Local tooling
 /.run/
 /.workbuddy/
+/.studio/
 
 # Editors and operating systems
 /.idea/

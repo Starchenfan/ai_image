@@ -3,8 +3,19 @@ import mysql, {
   type ResultSetHeader,
   type RowDataPacket,
 } from "mysql2/promise";
-import sharp from "sharp";
 import type { GeneratedImage, GenerateTask, HistoryItem } from "./types";
+import {
+  readImage,
+  optimizeImageForStorage,
+} from "./image-utils";
+import {
+  persistGeneratedImagesLocal,
+  listPersistedHistoryLocal,
+  getPersistedHistoryItemLocal,
+  setPersistedFavoriteLocal,
+  deletePersistedHistoryLocal,
+  getPersistedImageLocal,
+} from "./local-image-store";
 
 const globalForMysql = globalThis as unknown as {
   imageMysqlPool?: Pool;
@@ -95,61 +106,17 @@ async function ensureSchema() {
   await globalForMysql.imageSchemaPromise;
 }
 
-function decodeDataUrl(url: string) {
-  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(url);
-  if (!match) throw new Error("Invalid image data URL");
-  const [, mimeType, base64, body] = match;
-  return {
-    mimeType,
-    data: base64 ? Buffer.from(body, "base64") : Buffer.from(decodeURIComponent(body)),
-  };
-}
-
-async function readImage(url: string) {
-  if (url.startsWith("data:")) return decodeDataUrl(url);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Image download failed: ${response.status}`);
-  return {
-    mimeType: response.headers.get("content-type")?.split(";")[0] || "image/png",
-    data: Buffer.from(await response.arrayBuffer()),
-  };
-}
-
-function imageStorageQuality() {
-  const configured = Number(process.env.IMAGE_STORAGE_WEBP_QUALITY || 90);
-  return Number.isFinite(configured) ? Math.min(100, Math.max(1, configured)) : 90;
-}
-
-async function optimizeImageForStorage(data: Buffer, mimeType: string) {
-  if (mimeType === "image/gif" || mimeType === "image/svg+xml") {
-    return { data, mimeType };
-  }
-
-  try {
-    const optimized = await sharp(data, { animated: false })
-      .rotate()
-      .webp({
-        quality: imageStorageQuality(),
-        alphaQuality: 100,
-        effort: 4,
-        smartSubsample: true,
-      })
-      .toBuffer();
-
-    // Keep the source when WebP does not save at least 5%.
-    if (optimized.length >= data.length * 0.95) return { data, mimeType };
-    return { data: optimized, mimeType: "image/webp" };
-  } catch (error) {
-    console.warn("Image optimization failed; storing the source image:", error);
-    return { data, mimeType };
-  }
-}
-
+/**
+ * Persist generated images. MySQL when configured, otherwise the local
+ * file-system fallback — same contract, same return shape.
+ */
 export async function persistGeneratedImages(
   task: GenerateTask,
   images: GeneratedImage[]
 ): Promise<GeneratedImage[]> {
-  if (!isImageDatabaseConfigured()) return images;
+  if (!isImageDatabaseConfigured()) {
+    return persistGeneratedImagesLocal(task, images);
+  }
 
   try {
     await ensureSchema();
@@ -258,7 +225,9 @@ function parseParameters(value: unknown): HistoryItem["parameters"] {
 }
 
 export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
-  if (!isImageDatabaseConfigured()) return null;
+  if (!isImageDatabaseConfigured()) {
+    return listPersistedHistoryLocal();
+  }
   try {
     await ensureSchema();
     const [rows] = await getPool().query<HistoryRow[]>(`SELECT
@@ -310,11 +279,16 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
 }
 
 export async function getPersistedHistoryItem(id: string) {
+  if (!isImageDatabaseConfigured()) {
+    return getPersistedHistoryItemLocal(id);
+  }
   return (await getPersistedHistory())?.find((item) => item.id === id);
 }
 
 export async function setPersistedFavorite(taskId: string, favorite: boolean) {
-  if (!isImageDatabaseConfigured()) return false;
+  if (!isImageDatabaseConfigured()) {
+    return setPersistedFavoriteLocal(taskId, favorite);
+  }
   await ensureSchema();
   const [result] = await getPool().execute<ResultSetHeader>(
     "UPDATE generated_images SET favorite = ? WHERE task_id = ?",
@@ -324,7 +298,9 @@ export async function setPersistedFavorite(taskId: string, favorite: boolean) {
 }
 
 export async function deletePersistedHistory(taskId: string) {
-  if (!isImageDatabaseConfigured()) return false;
+  if (!isImageDatabaseConfigured()) {
+    return deletePersistedHistoryLocal(taskId);
+  }
   await ensureSchema();
   const [result] = await getPool().execute<ResultSetHeader>(
     "DELETE FROM generated_images WHERE task_id = ?",
@@ -334,7 +310,9 @@ export async function deletePersistedHistory(taskId: string) {
 }
 
 export async function getPersistedImage(id: string) {
-  if (!isImageDatabaseConfigured()) return null;
+  if (!isImageDatabaseConfigured()) {
+    return getPersistedImageLocal(id);
+  }
   await ensureSchema();
   const [rows] = await getPool().query<RowDataPacket[]>(
     "SELECT image_data, mime_type FROM generated_images WHERE id = ? LIMIT 1",

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Aperture,
   PenTool,
   Compass,
   History,
@@ -62,9 +61,7 @@ export function TopNav() {
           href="/"
           className="mr-4 flex items-center gap-2.5 transition-opacity hover:opacity-80"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-accent-ink">
-            <Aperture className="h-4 w-4" />
-          </span>
+          <img src="/image/logo.svg" alt="绘界" className="h-7 w-7 rounded-sm" />
           <span className="font-display text-base font-semibold tracking-tight text-ink">
             绘界
           </span>

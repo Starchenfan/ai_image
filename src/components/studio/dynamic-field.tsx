@@ -145,8 +145,11 @@ export function AdvancedParams({
   fields: ModelParameterSchema[];
 }) {
   const [open, setOpen] = useState(false);
-  const basic = fields.filter((f) => !f.advanced);
-  const advanced = fields.filter((f) => f.advanced);
+  // Hidden fields are declared so the adapter knows to forward them (e.g. seed),
+  // but the UI supplies them elsewhere — never render a control for them.
+  const visible = fields.filter((f) => !f.hidden);
+  const basic = visible.filter((f) => !f.advanced);
+  const advanced = visible.filter((f) => f.advanced);
 
   if (basic.length === 0 && advanced.length === 0) return null;
 
