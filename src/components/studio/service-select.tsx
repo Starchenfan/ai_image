@@ -8,6 +8,20 @@ import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import type { AiService } from "@/lib/types";
 
+/**
+ * AI 服务选择器 — 工作台表单组件。
+ *
+ * 从 /api/services 拉取所有已接入的 AI 图像生成服务，按
+ * 「推荐且在线 > 在线 > 列表首个」的优先级自动选中默认服务，
+ * 并渲染成可折叠的服务卡片：主卡展示当前服务名称、状态点、
+ * 延迟与推荐标记，折叠区列出其余可切换服务，底部常驻
+ * 「自动故障转移已开启」提示。
+ *
+ * 交互对象：
+ *   - TanStack Query 缓存（queryKey: ["services"]）
+ *   - useStudio store（读取/写入 serviceId）
+ *   - /api/services 路由（GET）
+ */
 async function fetchServices() {
   const r = await fetch("/api/services");
   return (await r.json()).services as AiService[];
@@ -33,7 +47,10 @@ export function ServiceSelect() {
   const set = useStudio((s) => s.set);
   const { data: services } = useQuery({ queryKey: ["services"], queryFn: fetchServices });
 
-  // pick first recommended/online service by default
+  // 默认服务选择策略（依次回退，命中即止）：
+  //   1. recommended && status === "online" 的服务
+  //   2. 任意 status === "online" 的服务
+  //   3. 服务列表的第一个（兜底，避免 UI 卡在空状态）
   useEffect(() => {
     if (!serviceId && services?.length) {
       const rec =

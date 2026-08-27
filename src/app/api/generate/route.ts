@@ -3,6 +3,21 @@ import { db } from "@/lib/db";
 import { enqueueTask } from "@/lib/task-runner";
 import type { GenerateRequest } from "@/lib/types";
 
+/**
+ * POST /api/generate — 提交生成任务。
+ *
+ * 校验请求体（服务/模型存在且在线、prompt 非空、Credits 充足）后，
+ * 从服务端 vault（db.apiKeys）注入真实 API Key，调 enqueueTask 入队。
+ *
+ * 关键设计：API Key 从服务端 vault 注入，绝不读取客户端，
+ * 客户端永远拿不到明文密钥。
+ *
+ * 失败路径：
+ *   - 404 服务或模型不存在
+ *   - 503 服务不在线
+ *   - 400 prompt 为空
+ *   - 402 Credits 不足（返回 cost 与 balance）
+ */
 // POST /api/generate
 export async function POST(req: Request) {
   const body = (await req.json()) as GenerateRequest;
@@ -31,7 +46,7 @@ export async function POST(req: Request) {
     seed: body.seed,
     parameters: body.parameters,
     referenceImage: body.referenceImage,
-    // Inject real key from server-side vault — never read from client.
+    // 从服务端 vault 注入真实 Key —— 绝不读取客户端
     apiKey: db.apiKeys.get(service.id),
   });
 

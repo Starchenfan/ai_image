@@ -10,9 +10,15 @@ export interface CompareEntry {
 }
 
 /**
- * Renders N models side by side for the same prompt. Polls each task until
- * it completes or fails — no SSE, a simple parallel poll is enough for a
- * comparison board where latency is secondary to the side-by-side view.
+ * 模型对比板 — 工作台展示组件。
+ *
+ * 把同一 Prompt 下 N 个模型的任务并排展示，逐个轮询（/api/tasks/:id）
+ * 直到完成或失败。deliberately 不用 SSE：对比板更看重左右并排的视觉效果，
+ * 延迟次要，简单的并行轮询足够。全部完成后提示「对比完成」。
+ *
+ * 交互对象：
+ *   - useStudio store（无直接依赖）
+ *   - /api/tasks/:id 路由（GET，轮询）
  */
 export function CompareBoard({
   entries,
@@ -39,7 +45,7 @@ export function CompareBoard({
             doneRef.current.add(e.taskId);
           }
         } catch {
-          /* ignore — retry next tick */
+          /* 忽略异常，下一次轮询重试 */
         }
       };
       poll();

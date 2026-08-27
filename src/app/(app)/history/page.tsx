@@ -24,12 +24,21 @@ import { useStudio } from "@/lib/store";
 
 type Filter = "all" | "today" | "favorite";
 
+// fetchHistory — 按筛选条件拉取历史记录。filter 既是查询参数，也是 react-query 的
+// queryKey 的一部分，切换 filter 会自动触发重取，无需手动 invalidate。
 async function fetchHistory(filter: Filter) {
   const r = await fetch(`/api/history?filter=${filter}`);
   return (await r.json()).items as HistoryItem[];
 }
 
-/** The full recipe behind one run — enough to reproduce it elsewhere. */
+/**
+ * recipeJson — 把一条历史记录序列化成「完整配方」JSON，供复制分享或外部复现。
+ *
+ * 为什么需要它：历史卡片上的「复用参数」只是把表单填回工作台，而这个 JSON
+ * 是给人/脚本/其它工具看的完整描述——包含 serviceId、modelId、aspectRatio、
+ * 甚至每张图实际用到的 seed。requestedSeed 塞 -1 是因为后端约定 undefined/null
+ * 表示「没手动指定 seed」，JSON 里不能省字段所以用 -1 占位。
+ */
 function recipeJson(h: HistoryItem) {
   return JSON.stringify(
     {
@@ -51,13 +60,35 @@ function recipeJson(h: HistoryItem) {
   );
 }
 
-/** Images are stored as WebP or PNG — never SVG. Take the real extension when
- *  the URL carries one, otherwise fall back to png. */
+/**
+ * downloadName — 生成下载文件名。
+ *
+ * 历史图片存成 WebP 或 PNG，从不存 SVG（SVG 无像素数据，不适合当图下载）。
+ * 文件名从 URL 里取真实扩展名：正则匹配 png/jpg/jpeg/webp/gif/avif，
+ * 匹配不到就退回 png，保证扩展名永远合理。
+ * 前缀 huijie- + id 保证唯一且好认。
+ */
 function downloadName(h: HistoryItem, url: string) {
   const ext = /\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.exec(url)?.[1] ?? "png";
   return `huijie-${h.id}.${ext.toLowerCase()}`;
 }
 
+/**
+ * HistoryPage — 生成历史页（/history）。
+ *
+ * 它是工作台的「回溯」面：所有生成结果自动落库到这里，用户可以翻旧账、
+ * 复用参数、重试、收藏、删除。和 / 的关系是「生产 → 存档」：
+ * 工作台生成完跳到这里查看，这里复用又跳回工作台。
+ *
+ * 筛选维度有三层：Tabs（全部/今日/收藏）控制后端查询，搜索框在前端再做一次
+ * 关键词过滤（prompt 或模型名命中）。搜索是纯前端的，因为 Tabs 已经把范围
+ * 缩小到几百条以内，客户端 filter 比再请求后端更快且无加载态。
+ *
+ * 布局：header（标题 + 搜索）→ Tabs → 网格卡片（4 列起，随宽度增加）。
+ * 每张卡片自包含：缩略图 + prompt + 模型/尺寸/比例 + 时间/耗时/消费 + 一排动作。
+ * 动作按钮全部放在卡片底部的 border-t 条里，hover 卡片时按钮并不显示/隐藏，
+ * 保证用户随时能点——历史页的高频操作就是「复用」「重试」。
+ */
 export default function HistoryPage() {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
@@ -67,13 +98,28 @@ export default function HistoryPage() {
   const applyHistoryItem = useStudio((s) => s.applyHistoryItem);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Refill the studio form from a past run and jump back to it. Seed is locked
-  // to the one the provider actually used, so the run is reproducible.
+  /**
+   * reuse — 「复用参数」按钮的回调，历史页 → 工作台的主通道。
+   *
+   * 角色：它不直接发请求，而是调用 store 的 applyHistoryItem 把整条历史记录
+   * 填回工作台表单（服务、模型、prompt、参数、参考图全部还原），再 router.push("/")
+   * 回到工作台。lockSeed: true 是关键副作用：把 seed 锁成当时真的用的那个值，
+   * 保证「复用」后重新生成的结果与原图一致，可复现、可比对。
+   */
   const reuse = (h: HistoryItem) => {
     applyHistoryItem(h, { lockSeed: true });
     router.push("/");
   };
 
+  /**
+   * copyRecipe — 「复制参数 JSON」按钮的回调。
+   *
+   * 角色：把 recipeJson 的输出写进剪贴板，给用户一个可粘贴到别处的完整配方。
+   * 副作用：本地 copiedId 记录「刚复制了哪一条」1600ms，让对应按钮的文案
+   * 从「复制参数 JSON」翻成「已复制参数 JSON」并高亮，给用户确认反馈。
+   * catch 里什么都不做：非安全上下文（如 localhost http）clipboard 会拒绝，
+   * 但此时没有可回滚的状态，静默失败比弹错误框体验好。
+   */
   const copyRecipe = async (h: HistoryItem) => {
     try {
       await navigator.clipboard.writeText(recipeJson(h));
@@ -84,11 +130,21 @@ export default function HistoryPage() {
     }
   };
 
+  // useQuery — 历史记录主数据源。默认 [] 让首屏不闪空，
+  // queryKey 含 filter，切 Tabs 就是换 key，自动重取且不会和别的 filter 的数据混。
   const { data: items = [] } = useQuery({
     queryKey: ["history", filter],
     queryFn: () => fetchHistory(filter),
   });
 
+  /**
+   * toggleFav — 收藏/取消收藏的 mutation。
+   *
+   * 角色：它是历史页里唯一「乐观更新」的操作。onMutate 里先用 setQueryData
+   * 改本地缓存（把目标 item 的 favorite 翻转），页面立刻响应；
+   * 网络请求在后台发，失败了 react-query 会自动回滚缓存。
+   * 之所以敢这么写，是因为 PATCH 是幂等的，重复提交不会出脏数据。
+   */
   const toggleFav = useMutation({
     mutationFn: async ({ id, fav }: { id: string; fav: boolean }) => {
       await fetch(`/api/history/${id}`, {
@@ -104,6 +160,14 @@ export default function HistoryPage() {
     },
   });
 
+  /**
+   * del — 删除一条历史记录的 mutation。
+   *
+   * 角色：单条删除，不做乐观更新（删除比收藏重，失败了用户更容易困惑），
+   * 而是等请求落定后 onSettled 统一失效 history 查询缓存、重新拉取。
+   * 注意是 invalidate 而不是 setQueryData：删除后列表长度变了，
+   * 服务端返回的顺序也可能变，让后端决定最终态最安全。
+   */
   const del = useMutation({
     mutationFn: async (id: string) => {
       await fetch(`/api/history/${id}`, { method: "DELETE" });
@@ -111,6 +175,15 @@ export default function HistoryPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["history"] }),
   });
 
+  /**
+   * retry — 「重试」按钮的 mutation。它和卡片上的「复用参数」是两个不同的诉求：
+   * 复用 = 把参数填回去用户自己改；重试 = 直接以原参数重新提交一次生成。
+   *
+   * 角色：调 /api/generate/{id}/retry 拿到新 taskId 后，写进 store 的 activeTaskId，
+   * 然后 router.push("/") 回工作台——回到工作台时 TaskStatus 会立刻开始轮询这个新任务。
+   * 之所以不直接在历史页展示结果，是因为生成是异步任务、可能耗时很久，
+   * 交给工作台的 TaskStatus 统一处理轮询/重试/换服务，历史页只负责触发。
+   */
   const retry = useMutation({
     mutationFn: async (id: string) => {
       const r = await fetch(`/api/generate/${id}/retry`, { method: "POST" });
@@ -123,6 +196,9 @@ export default function HistoryPage() {
     },
   });
 
+  // filtered — 前端二次过滤。Tabs 已经把数据范围缩小（全部/今日/收藏），
+  // 这里只按 prompt 与模型名做大小写不敏感的子串匹配，无额外网络开销。
+  // 之所以不做成服务端搜索接口：历史数据量小，前端 filter 足够且无加载态。
   const filtered = items.filter(
     (h) =>
       h.prompt.toLowerCase().includes(q.toLowerCase()) ||
@@ -172,7 +248,11 @@ export default function HistoryPage() {
               className="group relative flex flex-col overflow-hidden rounded-lg border border-line bg-paper-2/40 animate-fade-up"
               style={{ animationDelay: `${i * 40}ms` }}
             >
-              {/* thumb */}
+              {/* thumb — 卡片顶部的图片区，固定 aspect-video（16:9）。
+          有图时显示首张图，hover 时轻微放大（scale-105）给「可交互」感；
+          没图（生成失败且未产出图片）时显示居中的金山图标占位，
+          保证卡片高度一致、网格不乱。右上角两个角标：
+          count>1 时显示「×N」（批量生成），收藏时显示实心星星。 */}
               <div className="relative aspect-video overflow-hidden bg-paper-3">
                 {h.images[0] ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -200,7 +280,10 @@ export default function HistoryPage() {
                 </div>
               </div>
 
-              {/* body */}
+              body — 缩略图下方的信息区，flex-1 撑开，自上而下：
+          prompt（2 行截断）→ 模型/尺寸/比例标签行 → 时间 + 耗时/消费。
+          耗时和消费挤在同一行右侧，用 font-mono 对齐，方便扫一眼就知道
+          「什么时候跑的、花了多久、多少钱」。
               <div className="flex flex-1 flex-col gap-2 p-3">
                 <p className="line-clamp-2 text-xs text-ink-2">{h.prompt}</p>
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-ink-3">
@@ -217,7 +300,11 @@ export default function HistoryPage() {
                 </div>
               </div>
 
-              {/* actions */}
+              actions — 卡片底部 border-t 条上的操作按钮，始终可见（不依赖 hover）。
+          从左到右：复用参数 → 重试 → 收藏 → 复制参数 JSON → 下载（有图时）→ 删除。
+          删除按钮带 ml-auto 挤到最右，把常用操作聚在左侧。
+          之所以全部用 ActionBtn（图标 + title/aria-label）而不是文字按钮：
+          横向空间有限，图标一行能塞下 6 个动作，文字按钮一行最多 3-4 个。
               <div className="flex items-center gap-1 border-t border-line px-2 py-1.5">
                 <ActionBtn
                   icon={SlidersHorizontal}
@@ -271,7 +358,16 @@ export default function HistoryPage() {
   );
 }
 
-function ActionBtn({
+/**
+   * ActionBtn — 历史卡片操作栏的通用图标按钮。
+   *
+   * 它把「图标 + label + 三种状态（普通/激活/危险）+ 加载中）」抽成一个组件，
+   * 避免每个动作重复 20 行 className。label 同时作为 title 和 aria-label，
+   * 图标按钮没有可见文字时，靠 tooltip 让用户知道点下去会做什么。
+   * active 状态（收藏/复制）用 accent 色区分「当前是开的」，
+   * danger 状态（删除）hover 时变红，loading 时图标旋转并禁用。
+   */
+  function ActionBtn({
   icon: Icon,
   label,
   onClick,
@@ -306,7 +402,12 @@ function ActionBtn({
   );
 }
 
-function EmptyHistory() {
+/**
+   * EmptyHistory — 历史页的零状态。在三种情况下出现：切到某个筛选后无结果、
+   * 搜索无匹配、或账号从未生成过（和 stats 页的空状态是同一套视觉语言）。
+   * 按钮直接跳 / 去创作，形成「查不到 → 立刻去生产」的闭环。
+   */
+  function EmptyHistory() {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-paper-2">

@@ -22,6 +22,7 @@ const globalForMysql = globalThis as unknown as {
   imageSchemaPromise?: Promise<void>;
 };
 
+/** 检查是否配置了 MySQL 图片数据库（MYSQL_USER 与 MYSQL_DATABASE 均需设置）。 */
 export function isImageDatabaseConfigured() {
   return Boolean(process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
 }
@@ -107,8 +108,8 @@ async function ensureSchema() {
 }
 
 /**
- * Persist generated images. MySQL when configured, otherwise the local
- * file-system fallback — same contract, same return shape.
+ * 持久化生成的图片。配置了 MySQL 时写入 MySQL，否则使用本地文件系统回退方案
+ * —— 两者契约相同，返回形状一致。任一后端发生故障时，静默降级并返回原始图片。
  */
 export async function persistGeneratedImages(
   task: GenerateTask,
@@ -224,6 +225,7 @@ function parseParameters(value: unknown): HistoryItem["parameters"] {
   }
 }
 
+/** 读取全部历史记录并按任务分组。MySQL 查询失败时返回 null，以便调用方回退。 */
 export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
   if (!isImageDatabaseConfigured()) {
     return listPersistedHistoryLocal();
@@ -278,6 +280,7 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
   }
 }
 
+/** 按 id 获取单条历史记录。MySQL 未配置时走本地文件，否则从全量历史中查找。 */
 export async function getPersistedHistoryItem(id: string) {
   if (!isImageDatabaseConfigured()) {
     return getPersistedHistoryItemLocal(id);
@@ -285,6 +288,7 @@ export async function getPersistedHistoryItem(id: string) {
   return (await getPersistedHistory())?.find((item) => item.id === id);
 }
 
+/** 将指定任务下所有图片的收藏状态批量更新为 `favorite`，返回是否影响了行。 */
 export async function setPersistedFavorite(taskId: string, favorite: boolean) {
   if (!isImageDatabaseConfigured()) {
     return setPersistedFavoriteLocal(taskId, favorite);
@@ -297,6 +301,7 @@ export async function setPersistedFavorite(taskId: string, favorite: boolean) {
   return result.affectedRows > 0;
 }
 
+/** 删除指定任务的所有图片记录，返回是否影响了行。 */
 export async function deletePersistedHistory(taskId: string) {
   if (!isImageDatabaseConfigured()) {
     return deletePersistedHistoryLocal(taskId);
@@ -309,6 +314,7 @@ export async function deletePersistedHistory(taskId: string) {
   return result.affectedRows > 0;
 }
 
+/** 按图片 id 读取 LONGBLOB 字节与 mime 类型，不存在时返回 null。 */
 export async function getPersistedImage(id: string) {
   if (!isImageDatabaseConfigured()) {
     return getPersistedImageLocal(id);

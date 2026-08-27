@@ -26,6 +26,22 @@ import {
 } from "@/components/ui/dialog";
 import type { PromptTemplate } from "@/lib/types";
 
+/**
+ * Prompt 输入框 — 工作台表单组件。
+ *
+ * 主文本域输入生成描述，提供两类快捷强化：
+ *   - 「AI 润色」：调 /api/polish，用基元律动 glm-5.2 把描述润色成
+ *     生动、适合 AI 绘画的 prompt（无 mock 兜底）
+ *   - 风格/人物/场景/光影：在末尾追加对应风格后缀
+ * 另支持 Prompt 模板库弹窗、反向提示词（negativePrompt）折叠输入，
+ * 反向提示词是否可用由当前模型的 capabilities.negativePrompt 决定。
+ *
+ * 交互对象：
+ *   - useStudio store（prompt / negativePrompt / showNegative）
+ *   - lib/use-models（useSelectedModel，读取当前模型能力）
+ *   - /api/templates 路由（GET）
+ *   - /api/polish 路由（POST）
+ */
 async function fetchTemplates() {
   const r = await fetch("/api/templates");
   return (await r.json()).templates as PromptTemplate[];
@@ -52,9 +68,9 @@ export function PromptInput() {
   const negativePrompt = useStudio((s) => s.negativePrompt);
   const showNegative = useStudio((s) => s.showNegative);
   const set = useStudio((s) => s.set);
-  // The upstream field is opt-in per model — some relays (基元律动) 400 on it,
-  // so those models declare negativePrompt: false and the adapter drops it.
-  // Reflect that here instead of letting the user type into a dead box.
+  // 反向提示词是按模型可选的字段：部分中转（如基元律动）对其返回 400，
+  // 这些模型会声明 negativePrompt: false，由 adapter 在提交时丢弃该字段。
+  // 这里据此控制 UI 显示，避免用户往一个不会被提交的输入框里打字。
   const model = useSelectedModel();
   const negativeSupported = model?.capabilities.negativePrompt ?? true;
   const [optimizing, setOptimizing] = useState(false);
@@ -67,7 +83,7 @@ export function PromptInput() {
 
   const enhance = (tag: string) => {
     if (tag === "优化") {
-      // Real polish via 基元律动 glm-5.2 chat completions. No mock fallback.
+      // 真实润色：经基元律动 glm-5.2 chat completions 接口完成，无 mock 兜底。
       setOptimizing(true);
       setPolishError(null);
       const base = prompt.trim();
@@ -167,7 +183,7 @@ export function PromptInput() {
         className="min-h-[152px] resize-none rounded-lg bg-paper-2/80 px-3.5 py-3 text-[13px] leading-6 shadow-inner [scrollbar-gutter:stable] hover:bg-paper-3/55 focus-visible:bg-paper-3/65"
       />
 
-      {/* quick enhance chips */}
+      {/* 快捷强化芯片 */}
       <div className="flex flex-wrap gap-1.5">
         {QUICK.map((q) => {
           const Icon = q.icon;
@@ -191,7 +207,7 @@ export function PromptInput() {
         </p>
       )}
 
-      {/* negative prompt toggle */}
+      {/* 反向提示词折叠 */}
       <div>
         <button
           onClick={() => set("showNegative", !showNegative)}

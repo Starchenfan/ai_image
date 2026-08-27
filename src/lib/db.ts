@@ -1,14 +1,12 @@
 /**
- * In-memory mock DB (server-side singleton). Simulates Postgres + Redis task queue.
- * In production: replace with Prisma/Postgres + BullMQ. The adapter interface stays.
+ * 进程内内存型 mock 数据库（服务端单例）。模拟 Postgres + Redis 任务队列。
+ * 生产环境替换为 Prisma/Postgres + BullMQ，适配器接口保持不变。
  *
- * The store starts empty by design — the admin adds services/models at runtime
- * via the adapter registry. Nothing about a specific provider is hard-coded in
- * the adapter layer or types.
+ * store 按设计从空开始——管理员在运行时通过适配器注册表添加服务/模型。
+ * 适配器层与类型层不硬编码任何具体厂商信息。
  *
- * The one exception is the default service below: seeded once on first import
- * so the workbench is usable out-of-the-box. The real API key lives ONLY in
- * the server-side apiKeys vault (process memory) — never serialized to client.
+ * 唯一的例外是下方的默认服务：首次导入时种子化一次，使工作箱开箱即用。
+ * 真实 API Key 只存在于服务端 apiKeys 密钥库（进程内存）中——不会序列化到客户端。
  */
 import type {
   AiService,
@@ -21,8 +19,8 @@ import { maskKey } from "./mask";
 import { defaultPromptTemplates } from "./seed";
 import { installProxyDispatcher } from "./proxy";
 
-// Make server-side fetch honor HTTP(S)_PROXY — installed once, before any
-// route handler issues an outbound call (db is imported by every route).
+// 使服务端 fetch 遵守 HTTP(S)_PROXY —— 模块初始化时安装一次，早于任何路由处理器
+// 发起的外呼（db 被每个路由引用，因此这里安装最早）。
 installProxyDispatcher();
 
 type GlobalStore = {
@@ -34,41 +32,40 @@ type GlobalStore = {
   credits: number;
   autoFailover: boolean;
   /**
-   * Server-side key vault. Real API keys live ONLY here (process memory).
-   * The masked stub on AiService is display-only; never serialized to client.
+   * 服务端密钥库。真实 API Key 只存在这里（进程内存）。
+   * AiService 上的脱敏桩仅用于展示，不会序列化到客户端。
    */
   apiKeys: Map<string, string>;
 };
 
 const g = globalThis as unknown as { __studioStore?: GlobalStore };
 
-/** Default service ids — referenced by the seeded services + their models. */
+/** 种子服务及其模型所引用的默认服务 ID 常量。 */
 const DEFAULT_SERVICE_ID = "svc-tokenrhythm";
 const DEFAULT_MODEL_ID = "mdl-qwen-image-2";
-/** Second seeded service — SenseTime 日日新 (SenseNova). */
+/** 第二个种子服务——商汤日日新（SenseNova）。 */
 const SENSENOVA_SERVICE_ID = "svc-sensenova";
 const SENSENOVA_MODEL_ID = "mdl-sensenova-u1.5-lite";
-/** Second model on the 基元律动 relay — Alibaba Wan 2.7 image. */
+/** 基元律动中转站上的第二个模型——阿里云通义万相 Wan 2.7 文生图。 */
 const WAN_MODEL_ID = "mdl-wan2-7-image";
-/** Step (阶跃星辰) — OpenAI-compatible gateway at api.stepfun.com. */
+/** Step（阶跃星辰）—— 位于 api.stepfun.com 的 OpenAI 兼容网关。 */
 const STEPFUN_SERVICE_ID = "svc-stepfun";
 const STEPFUN_MODEL_EDIT_ID = "mdl-step-image-edit-2";
 const STEPFUN_MODEL_LARGE_ID = "mdl-step-2x-large";
-/** Step API key — server-side only, never serialized to client. */
+/** Step API Key，仅服务端持有，不会序列化到客户端。 */
 const STEP_API_KEY = "1knsLeeiIHpEPHDbOcVYTg3mbK8s3xwwzsnYRCLJplYPd7z4uycWrSJ3zqdtLhswG";
-/** Aixoras — OpenAI-compatible image API at api.aixoras.com. Default model gpt-image-2. */
+/** Aixoras —— 位于 api.aixoras.com 的 OpenAI 兼容图像 API，默认模型 gpt-image-2。 */
 const AIXORAS_SERVICE_ID = "svc-aixoras";
 const AIXORAS_MODEL_ID = "mdl-gpt-image-2";
-/** Aixoras API key — server-side only, never serialized to client. */
+/** Aixoras API Key，仅服务端持有，不会序列化到客户端。 */
 const AIXORAS_API_KEY = "sk-zM6AdAYdnbcmv82Q7H4JPLMeEOtIBy9ydtYIe4fOsDcmBpQD";
-/** Default provider key — stored only in the server-side vault. */
+/** 默认厂商密钥，仅存储在服务端密钥库中。 */
 const DEFAULT_API_KEY = "sk_tr_mxz2CZTLl2iLv0yn624bg2LONrtXbENj6oj_LRGbYg4";
 const SENSENOVA_API_KEY = "sk-1k6cNNMHLkczOyYIApMpm4F3s7Atxxfa";
 
 /**
- * Seed data lives at module scope — not inside a one-shot `if` — so a hot
- * reload (which re-runs this module in the SAME Node process) can idempotently
- * merge missing entries below instead of silently keeping a stale store.
+ * 种子数据放在模块作用域，而不是一次性 if 里——这样热重载（在同一 Node 进程中
+ * 重新执行本模块）可以幂等地合并下方缺失的条目，而不是默默保留过期的 store。
  */
 const seedServices: AiService[] = [
   {
@@ -133,9 +130,9 @@ const seedModels: AiModel[] = [
       textToImage: true,
       imageToImage: false,
       inpainting: false,
-      // 基元律动 gateway 400s on ANY key outside {model,prompt,n,size} —
-      // probed live: adding negative_prompt returns
-      // {"code":"BAD_REQUEST","message":"请求包含未知字段"}.
+      // 基元律动 gateway 对任何超出 {model, prompt, n, size} 的字段都返回 400——
+      // 实测：添加 negative_prompt 会返回
+      // {"code":"BAD_REQUEST","message":"请求包含未知字段"}。
       negativePrompt: false,
       variations: false,
     },
@@ -161,7 +158,7 @@ const seedModels: AiModel[] = [
       textToImage: true,
       imageToImage: false,
       inpainting: false,
-      // Same gateway, same strict field allowlist — see qwen-image-2.0 above.
+      // 同一个 gateway，同样严格的字段白名单——参见上方 qwen-image-2.0 的说明。
       negativePrompt: false,
       variations: false,
     },
@@ -201,8 +198,8 @@ const seedModels: AiModel[] = [
         description: "开启提示词自动润色优化，扩写失败时自动使用原始 prompt" },
     ],
     supportedAspectRatios: ["1:1", "16:9", "9:16", "2:3", "3:2"],
-    // Sizes dictated by the provider — strict allowlist; any other size is
-    // 400-rejected. 2K first, then the single 4K option.
+    // 尺寸由提供商标识——严格白名单，任何其它尺寸都会被 400 拒绝。
+    // 先列 2K，再列唯一的 4K 选项（4096x4096）。
     supportedSizes: [
       "2048x2048",
       "2720x1536",
@@ -248,8 +245,8 @@ const seedModels: AiModel[] = [
         description: "针对文字场景的优化策略,默认关闭" },
     ],
     supportedAspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"],
-    // Provider documents size as "height x width" for this model — the strings
-    // below are stored in API-native order; the adapter swaps on parse.
+    // 该模型的提供商标识 size 为「高 x 宽」——下方字符串按 API 原生顺序存储，
+    // 适配器在解析时交换宽高（adapters.ts 的 parseSize 的 heightFirst 参数）。
     supportedSizes: [
       "1024x1024",
       "768x1360",
@@ -380,10 +377,9 @@ if (!g.__studioStore) {
   };
 }
 
-// Idempotent merge — add any seeded service / model / API key that is missing.
-// Keyed by id, so re-running never duplicates and never clobbers admin edits
-// made at runtime. This is what makes seed changes apply on hot reload without
-// a full server restart.
+// 幂等合并——补上所有缺失的种子服务 / 模型 / API Key。
+// 以 id 为键，因此重复执行不会产生重复条目，也不会覆盖运行时管理员的修改。
+// 这就是种子改动能在热重载下生效、无需完全重启服务的原因。
 for (const svc of seedServices) {
   if (!g.__studioStore.services.some((s) => s.id === svc.id)) {
     g.__studioStore.services.push(svc);

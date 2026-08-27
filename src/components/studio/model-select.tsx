@@ -11,6 +11,21 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import type { AiModel } from "@/lib/types";
 
+/**
+ * 模型选择器 — 工作台表单组件。
+ *
+ * 根据 store 中的 serviceId 拉取该服务下的全部模型列表（/api/models?serviceId=），
+ * 支持两种模式：
+ *   - 单选模式：点击主卡展开搜索列表，选中后写入 modelId
+ *   - 对比模式：勾选至少 2 个模型，同一 Prompt 侧向对比生成
+ * 模型切换时会自动把动态参数、比例、尺寸、数量重置为新模型 schema 的默认值。
+ *
+ * 交互对象：
+ *   - TanStack Query 缓存（queryKey: ["models", serviceId]）
+ *   - useStudio store（serviceId / modelId / compareMode / compareIds / parameters 等）
+ *   - /api/models 路由（GET）
+ *   - lib/use-models（useSelectedModel）
+ */
 export function ModelSelect() {
   const serviceId = useStudio((s) => s.serviceId);
   const modelId = useStudio((s) => s.modelId);
@@ -27,7 +42,7 @@ export function ModelSelect() {
     enabled: !!serviceId,
   });
 
-  // auto-select first model when service changes
+  // 服务切换后，若当前 modelId 已不在新服务的模型列表中，自动选中首个模型
   useEffect(() => {
     if (models?.length) {
       const stillValid = models.some((m) => m.id === modelId);
@@ -35,7 +50,10 @@ export function ModelSelect() {
     }
   }, [models, modelId, set]);
 
-  // when model changes, reset dynamic params to schema defaults
+  // 模型切换时，把动态参数、比例、尺寸、数量全部重置为新模型 schema 的默认值，
+  // 避免把旧模型的参数发给新模型（上游可能 400）。
+  // 例外：若 store 中 pendingRecipeFor 正好指向当前模型，
+  // 说明是预设/历史配方刚填的表，保留用户真实值，不做覆盖。
   useEffect(() => {
     if (!models) return;
     const m = models.find((x) => x.id === modelId);
@@ -124,7 +142,7 @@ export function ModelSelect() {
         </label>
       </div>
 
-      {/* current model card (single-select mode only) */}
+      {/* 当前模型主卡（仅单选模式显示） */}
       {!compareMode && current && (
         <button
           onClick={() => setOpen((o) => !o)}

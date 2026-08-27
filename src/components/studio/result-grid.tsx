@@ -14,6 +14,18 @@ import type { GeneratedImage, GenerateTask } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { ImageViewer } from "./image-viewer";
 
+/**
+ * 结果网格 — 工作台展示组件。
+ *
+ * 把任务生成的图片按 1 张单列 / 多张双列网格渲染，hover 时浮现
+ * 下载、放大、收藏、复制 Prompt、重新生成、删除六个操作按钮，
+ * 点击图片可进入全屏查看器（ImageViewer）。收藏状态仅本地记忆。
+ *
+ * 交互对象：
+ *   - useStudio store（无直接依赖，纯展示）
+ *   - 子组件 ImageViewer
+ */
+
 const HOVER_ACTIONS = [
   { icon: Download, label: "下载" },
   { icon: Maximize2, label: "放大" },
@@ -40,8 +52,8 @@ export function ResultGrid({ task }: { task: GenerateTask }) {
   };
 
   const download = async (img: GeneratedImage) => {
-    // Fetch as blob so cross-origin OSS URLs download as a real file rather
-    // than opening in a tab; falls back to direct href if fetch is blocked.
+    // 用 fetch-as-blob 让跨域 OSS 地址真正下载成文件，而不是在标签页打开；
+    // fetch 被拦截时退化为直接跳转 href。
     const ext = img.url.startsWith("data:") ? "png" : (img.url.split("?")[0].split(".").pop() || "png").toLowerCase();
     try {
       const res = await fetch(img.url);
@@ -69,10 +81,9 @@ export function ResultGrid({ task }: { task: GenerateTask }) {
     <>
       <div className={cn("grid gap-3", cols)}>
         {task.images.map((img, i) => {
-          // Fit the whole image in one viewport: the box width is the
-          // smaller of the grid column and (viewport height budget ×
-          // ratio), so tall/large images shrink instead of forcing the
-          // canvas to scroll. aspect-ratio keeps the original proportion.
+          // 让图片完整塞进可视区：盒子宽度取「网格列宽」与
+          // （可视区高度预算 × 宽高比）的较小值，这样高图/大图会缩小，
+          // 而不是撑动画布导致滚动。aspect-ratio 保持原始比例。
           const ratio = img.width && img.height ? img.width / img.height : 1;
           const heightBudget =
             task.images.length === 1

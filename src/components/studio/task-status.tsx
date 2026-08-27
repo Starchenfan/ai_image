@@ -16,9 +16,9 @@ function stageIndex(status: GenerateTask["status"]) {
 }
 
 /**
- * Synthesize a failed task when the real one has vanished from the store
- * (e.g. dev server restarted mid-task, bad id). Lets the UI unblock instead of
- * spinning forever on a task id that no longer exists.
+ * 当真实任务已从 store 中消失时（如开发服务器在任务进行中重启、
+ * 传入了错误的 id），合成一个失败任务，让 UI 解锁，
+ * 而不是在不存在的任务 id 上无限转圈。
  */
 function syntheticFailedTask(taskId: string): GenerateTask {
   return {
@@ -35,8 +35,22 @@ function syntheticFailedTask(taskId: string): GenerateTask {
 }
 
 /**
- * Subscribes to a task via SSE (preferred), polls as fallback.
- * Exposes progress bar, stage label, failure UI with retry/switch options.
+ * 任务状态订阅组件 — 工作台表单组件。
+ *
+ * 优先通过 SSE（/api/tasks/:id/stream）订阅任务进度，SSE 不可用时
+ * 退化为 800ms 轮询（/api/tasks/:id）。暴露进度条、阶段标签，
+ * 失败时提供「重新生成 / 切换服务」两个出口。
+ *
+ * 关键设计：
+ *   - SSE 优先：onmessage 解析任务 JSON，onerror 或非法 payload 时
+ *     自动切到轮询，不再尝试重建 SSE
+ *   - 404 兜底：轮询拿到 404（任务被重启清掉）时合成失败任务解锁 UI
+ *   - doneRef 防重复回调：completed/failed 后立即 cleanup，避免双触发
+ *
+ * 交互对象：
+ *   - useStudio store（activeTaskId）
+ *   - /api/tasks/:id 路由（GET，轮询）
+ *   - /api/tasks/:id/stream 路由（GET，SSE）
  */
 export function TaskStatus({
   taskId,
@@ -69,7 +83,7 @@ export function TaskStatus({
       try {
         const r = await fetch(`/api/tasks/${taskId}`);
         if (r.status === 404) {
-          // Task vanished (server restarted, bad id, etc.) — unblock the UI.
+          // 任务已消失（服务重启、id 错误等）—— 合成失败任务解锁 UI
           const t = syntheticFailedTask(taskId);
           setTask(t);
           if (!done.current) {
@@ -90,7 +104,7 @@ export function TaskStatus({
           cleanup();
         }
       } catch {
-        /* swallow — will retry next tick */
+        /* 吞掉异常，下一次轮询重试 */
       }
     };
 
@@ -99,7 +113,7 @@ export function TaskStatus({
       es.onmessage = (ev) => {
         try {
           const t = JSON.parse(ev.data) as GenerateTask;
-          // Stream may emit {error:"not found"} when task is gone.
+          // 流可能在任务消失时发出 {error:"not found"}
           if (t && !("id" in t) && !Array.isArray(t)) {
             throw new Error("not found");
           }
@@ -113,7 +127,7 @@ export function TaskStatus({
             cleanup();
           }
         } catch {
-          // Payload wasn't a task (likely the error event) — fall back to poll.
+          // payload 不是任务对象（可能是 error 事件）—— 退化到轮询
           setUsingSse(false);
           es?.close();
           es = null;
@@ -124,7 +138,7 @@ export function TaskStatus({
         }
       };
       es.onerror = () => {
-        // SSE failed — fall back to polling
+        // SSE 失败 —— 退化到轮询
         setUsingSse(false);
         es?.close();
         es = null;

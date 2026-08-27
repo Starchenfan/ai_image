@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import type { GeneratedImage } from "./types";
 
-/** Parse a data URL into { mimeType, data }. Shared by MySQL + local backends. */
+/** 将 data URL 解析为 { mimeType, data }。MySQL 后端与本地后端共用同一实现。 */
 export function decodeDataUrl(url: string) {
   const match = /^data:([^;,]+)((?:;[^,]*)*),(.*)$/s.exec(url);
   if (!match) throw new Error("Invalid image data URL");
@@ -15,7 +15,7 @@ export function decodeDataUrl(url: string) {
   };
 }
 
-/** Read an image from a data URL or remote URL into a Buffer. */
+/** 从 data URL 或远程 URL 读取图片，返回 Buffer 与 mime 类型。 */
 export async function readImage(url: string): Promise<{ data: Buffer; mimeType: string }> {
   if (url.startsWith("data:")) return decodeDataUrl(url);
   const response = await fetch(url);
@@ -26,14 +26,16 @@ export async function readImage(url: string): Promise<{ data: Buffer; mimeType: 
   };
 }
 
+/** 读取 IMAGE_STORAGE_WEBP_QUALITY 环境变量作为 WebP 输出质量，夹在 1–100 之间，默认 90。 */
 function imageStorageQuality() {
   const configured = Number(process.env.IMAGE_STORAGE_WEBP_QUALITY || 90);
   return Number.isFinite(configured) ? Math.min(100, Math.max(1, configured)) : 90;
 }
 
 /**
- * Convert to high-quality WebP for storage. GIF/SVG are left alone, and the
- * source is kept when WebP does not save at least 5%.
+ * 将图片转为高质量 WebP 后再存储。GIF/SVG 不做转换，直接保留；
+ * 若 WebP 体积达不到原始图片的 95%（即节省不足 5%），则保留原始图片。
+ * 转换失败时静默降级，仍保存原始图片。
  */
 export async function optimizeImageForStorage(data: Buffer, mimeType: string) {
   if (mimeType === "image/gif" || mimeType === "image/svg+xml") {
@@ -59,7 +61,7 @@ export async function optimizeImageForStorage(data: Buffer, mimeType: string) {
   }
 }
 
-/** Map a stored mime type to a file extension. */
+/** 把存储时的 mime 类型映射为文件扩展名。 */
 export function imageFileExtension(mimeType: string): string {
   if (mimeType === "image/webp") return "webp";
   if (mimeType === "image/png") return "png";
@@ -70,5 +72,5 @@ export function imageFileExtension(mimeType: string): string {
   return "png";
 }
 
-/** Re-exported so type-only consumers keep working. */
+/** 重新导出，便于仅消费类型的模块继续引用。 */
 export type { GeneratedImage };

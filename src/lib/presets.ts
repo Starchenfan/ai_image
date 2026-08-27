@@ -58,7 +58,7 @@ async function ensureSchema() {
   await globalForPresets.presetsSchemaPromise;
 }
 
-/** In-memory fallback when MySQL is not configured. */
+/** MySQL 未配置时的内存回退方案。 */
 const memPresets: Preset[] = [];
 
 type PresetRow = RowDataPacket & {
@@ -105,6 +105,7 @@ function rowToPreset(row: PresetRow): Preset {
   };
 }
 
+/** 读取所有 preset，按创建时间倒序返回。MySQL 异常时静默回退到内存列表。 */
 export async function listPresets(): Promise<Preset[]> {
   if (!isConfigured()) {
     return [...memPresets].sort((a, b) => b.createdAt - a.createdAt);
@@ -121,6 +122,10 @@ export async function listPresets(): Promise<Preset[]> {
   }
 }
 
+/**
+ * 创建一个 preset。MySQL 写入失败时静默回退到内存列表，仍返回生成的 preset。
+ * 返回值包含自动生成的 id 与当前时间戳的 createdAt。
+ */
 export async function createPreset(
   p: Omit<Preset, "id" | "createdAt">
 ): Promise<Preset> {
@@ -159,6 +164,7 @@ export async function createPreset(
   }
 }
 
+/** 删除指定 id 的 preset，返回是否实际删除了行。 */
 export async function deletePreset(id: string): Promise<boolean> {
   if (!isConfigured()) {
     const i = memPresets.findIndex((p) => p.id === id);

@@ -1,3 +1,9 @@
+/**
+ * 厂商适配器实现。所有第三方图像 API 都通过实现 ImageProvider 接口接入，
+ * 调用方（task-runner）只依赖接口，不感知具体厂商。
+ * 五种适配器：openai（OpenAI 兼容，真实 HTTP）、flux / stable_diffusion /
+ * custom / proxy（均为 mock 占位，用于无真实 Key 的开发演示）。
+ */
 import type {
   ImageProvider,
   GenerateParams,
@@ -19,7 +25,7 @@ function hueFromPrompt(prompt: string): number {
 
 function parseSize(size: string, heightFirst = false): [number, number] {
   const [a, b] = size.split("x").map(Number);
-  // Some providers (e.g. step-image-edit-2) document size as "height x width".
+  // 部分提供商标识 size 为「高 x 宽」（例如 step-image-edit-2）。
   return heightFirst ? [b || 1024, a || 1024] : [a || 1024, b || 1024];
 }
 
@@ -28,10 +34,11 @@ async function delay(ms: number) {
 }
 
 /**
- * True for the 400 a strict relay returns when the body carries a key outside
- * its allowlist (基元律动: `{"code":"BAD_REQUEST","message":"请求包含未知字段"}`).
- * Used to retry core-only instead of failing the task when a model's declared
- * capabilities / parameter schema over-promise what the upstream accepts.
+ * 判断是否为「严格中转站拒绝未知字段」的 400 错误。
+ * 当请求体包含白名单之外的字段时，严格中转站会返回 400
+ * （基元律动：`{"code":"BAD_REQUEST","message":"请求包含未知字段"}`）。
+ * 用途：当模型声明的能力 / 参数 schema 超出上游实际接受范围时，
+ * 退化为仅发送核心字段重试，而不是直接让任务失败。
  */
 function isUnknownFieldError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : "";
@@ -41,7 +48,7 @@ function isUnknownFieldError(e: unknown): boolean {
   );
 }
 
-/** Shared mock generation — returns deterministic-ish placeholder images. */
+/** 共用的 mock 生成逻辑——返回确定性较强的占位图片（无网络、无需真实 Key）。 */
 async function mockGenerate(
   params: GenerateParams,
   opts: { speedMul: number; failRate: number; baseMs: number }
@@ -68,13 +75,13 @@ async function mockGenerate(
 }
 
 /**
- * OpenAI-compatible adapter. Talks the POST /v1/images/generations contract:
+ * OpenAI 兼容适配器。遵循 POST /images/generations 契约：
  *   { model, prompt, n, size } + Authorization: Bearer <key>
- * Real providers that mirror this shape (TokenRhythm relay, OpenAI, open
- * gateways) all flow through here. Only the baseUrl + modelId differ.
+ * 所有形状与之吻合的真实厂商（TokenRhythm 中转站、OpenAI、开放网关）都走这里，
+ * 只有 baseUrl + modelId 不同。
  *
- * Falls back to a placeholder image if no apiKey is wired (dev/demo), so the
- * workbench stays usable without a live upstream.
+ * 若未接通真实 apiKey（开发/演示环境），退化为占位图片，使工作台在没有真实
+ * 上游时仍可端到端演示。
  */
 class OpenAICompatAdapter implements ImageProvider {
   readonly adapterType: AdapterType = "openai";
@@ -82,18 +89,18 @@ class OpenAICompatAdapter implements ImageProvider {
   async generate(params: GenerateParams): Promise<GenerateProviderResult> {
     const { service, model, prompt, count, size, apiKey, parameters } = params;
 
-    // No real key → mock so the UI is still demonstrable end-to-end.
+    // 无真实 Key → 走 mock，保证 UI 仍可端到端演示。
     if (!apiKey) {
       return mockGenerate(params, { speedMul: 1, failRate: 0.04, baseMs: 4000 });
     }
 
-    // Image-to-image — a reference image was supplied → images/edits.
+    // 图生图——传入了参考图 → 走 /images/edits 接口。
     if (params.referenceImage) {
       return this.edit(params);
     }
 
-    // The four fields every OpenAI-compat image endpoint accepts. Kept as a
-    // separate object so a strict relay can be retried with core-only.
+    // 每个 OpenAI 兼容图像接口都会接受的四个核心字段。
+    // 单独维护成 core 对象，以便严格中转站重试时可以只发核心字段。
     const core: Record<string, unknown> = {
       model: model.modelId,
       prompt,
@@ -101,28 +108,26 @@ class OpenAICompatAdapter implements ImageProvider {
       size,
     };
     const body: Record<string, unknown> = { ...core };
-    // Negative prompt — send only when the model opts in via
-    // capabilities.negativePrompt AND the user actually supplied one, so a
-    // strict relay never sees an unexpected key. Flip the capability flag to
-    // false on a model to opt that model out (e.g. a relay that 400s on it).
+    // 负面提示词——仅在模型通过 capabilities.negativePrompt 声明支持、
+    // 且用户实际填写了负向提示词时才发送，避免严格中转站看到意料之外的字段。
+    // 将模型的该能力标志置为 false 即可让该模型退出
+    // （例如某个中转站对 negative_prompt 直接 400）。
     if (model.capabilities.negativePrompt && params.negativePrompt?.trim()) {
       body.negative_prompt = params.negativePrompt.trim();
     }
-    // Forward schema-declared params the model explicitly maps to provider
-    // fields. Many strict OpenAI-compat relays (TokenRhythm/qwen) reject ANY
-    // unknown key with 400, so only send what the model's schema opts into —
-    // never free-form extras.
+    // 透传模型 schema 中明确声明、并映射到厂商字段的参数。
+    // 许多严格的 OpenAI 兼容中转站（TokenRhythm/qwen）对任何未知字段都以 400
+    // 拒绝，因此只发送模型 schema 明确勾选的字段——绝不发送自由附加项。
     for (const [k, v] of Object.entries(parameters ?? {})) {
       const known = model.parameters.find((p) => p.key === k);
       if (known && body[k] === undefined) body[k] = v;
     }
-    // Seed — some providers accept an explicit generation seed. Opt in via the
-    // model schema (hidden entry) so strict relays never see an unexpected key.
-    // The UI supplies seed through the top-level field, but it may also arrive
-    // via the parameters record (preset / history reuse), so resolve both.
-    // NOTE: the schema loop above may have already copied parameters.seed (even
-    // -1) into body.seed — when the effective seed is "random" we must delete it,
-    // otherwise a stray -1 reaches the provider and 400s.
+    // Seed——部分厂商接受显式生成种子。通过模型 schema（隐藏条目）声明，
+    // 使严格中转站不会看到意料之外的字段。
+    // UI 通过顶层字段提供 seed，但也可能通过 parameters 记录传入
+    // （预设 / 历史记录复用），因此两处都要解析。
+    // 注意：上方 schema 循环可能已将 parameters.seed（甚至 -1）复制到 body.seed——
+    // 当实际种子为「随机」时必须删除，否则多余的 -1 会传到厂商并引发 400。
     const seedParam = model.parameters.find((p) => p.key === "seed");
     if (seedParam) {
       const min = seedParam.min ?? 0;
@@ -144,9 +149,8 @@ class OpenAICompatAdapter implements ImageProvider {
     try {
       data = await this.postJson(url, body, apiKey, service.name);
     } catch (e) {
-      // Relay rejected an extra key. The model's declared schema over-promised
-      // what this upstream takes — drop the extras and retry once rather than
-      // failing the whole task.
+      // 中转站拒绝了多余字段。模型声明的 schema 超出了该上游实际接受的范围——
+      // 丢弃多余字段后重试一次，而不是让整个任务失败。
       const hasExtras = Object.keys(body).length > Object.keys(core).length;
       if (!hasExtras || !isUnknownFieldError(e)) throw e;
       data = await this.postJson(url, core, apiKey, service.name);
@@ -154,7 +158,7 @@ class OpenAICompatAdapter implements ImageProvider {
     return this.toResult(data, params);
   }
 
-  /** Image-to-image via POST /images/edits (JSON base64 body). */
+  /** 通过 POST /images/edits 进行图生图（JSON + base64 参考图）。 */
   private async edit(params: GenerateParams): Promise<GenerateProviderResult> {
     const { service, model, prompt, count, size, apiKey, referenceImage } = params;
     if (!apiKey) throw new Error(`${service.name} 未配置 API Key`);
@@ -189,18 +193,16 @@ class OpenAICompatAdapter implements ImageProvider {
     apiKey: string,
     serviceName: string
   ): Promise<{ data?: Array<{ url?: string; b64_json?: string }> }> {
-    // Provider relays intermittently throw 502/503/504 or time out under load.
-    // Retry transient faults a few times with backoff; 4xx (except 429) is a
-    // real client error and is never retried.
+    // 厂商中转站在负载下会间歇性抛出 502/503/504 或超时。
+    // 对瞬时故障按退避策略重试几次；4xx（429 除外）是真实的客户端错误，绝不重试。
     const TRANSIENT = new Set([429, 500, 502, 503, 504, 524]);
     const MAX_ATTEMPTS = 3;
     let res: Response | null = null;
     let lastDetail = "";
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        // 90s client-side timeout — Aixoras sits behind Cloudflare which
-        // returns 524 after ~100s; abort just before that so we retry sooner
-        // instead of waiting out the full Cloudflare window.
+        // 90 秒客户端超时——Aixoras 落在 Cloudflare 之后，约 100 秒后返回 524；
+        // 提前一点中止，以便更快重试，而不是干等完整个 Cloudflare 窗口。
         const signal = AbortSignal.timeout(90_000);
         res = await fetch(url, {
           method: "POST",
@@ -219,7 +221,7 @@ class OpenAICompatAdapter implements ImageProvider {
         if (attempt === MAX_ATTEMPTS)
           throw new Error(`${serviceName} 网络错误: ${(e as Error).message}`);
       }
-      await delay(800 * attempt); // 0.8s, 1.6s backoff
+      await delay(800 * attempt); // 退避间隔：0.8s、1.6s
     }
 
     if (!res || !res.ok) {
@@ -230,6 +232,7 @@ class OpenAICompatAdapter implements ImageProvider {
     return (await res.json()) as { data?: Array<{ url?: string; b64_json?: string }> };
   }
 
+  /** 把厂商返回的原始数据转成 GenerateProviderResult（补全 url / width / height / seed）。 */
   private toResult(
     data: { data?: Array<{ url?: string; b64_json?: string }> },
     params: GenerateParams
@@ -258,6 +261,7 @@ class OpenAICompatAdapter implements ImageProvider {
   }
 }
 
+/** Flux 适配器（mock 占位）—— 模拟黑石-flux 模型，速度略慢、失败率略高。 */
 class FluxAdapter implements ImageProvider {
   readonly adapterType: AdapterType = "flux";
   async generate(params: GenerateParams): Promise<GenerateProviderResult> {
@@ -265,6 +269,7 @@ class FluxAdapter implements ImageProvider {
   }
 }
 
+/** Stable Diffusion 适配器（mock 占位）—— 速度最快、基础耗时最短。 */
 class StableDiffusionAdapter implements ImageProvider {
   readonly adapterType: AdapterType = "stable_diffusion";
   async generate(params: GenerateParams): Promise<GenerateProviderResult> {
@@ -272,6 +277,7 @@ class StableDiffusionAdapter implements ImageProvider {
   }
 }
 
+/** 自定义适配器（mock 占位）—— 模拟不稳定的自建端点，失败率最高（0.18）。 */
 class CustomAdapter implements ImageProvider {
   readonly adapterType: AdapterType = "custom";
   async generate(params: GenerateParams): Promise<GenerateProviderResult> {
@@ -279,6 +285,7 @@ class CustomAdapter implements ImageProvider {
   }
 }
 
+/** 代理适配器（mock 占位）—— 经由中转代理的模型，失败率适中。 */
 class ProxyAdapter implements ImageProvider {
   readonly adapterType: AdapterType = "proxy";
   async generate(params: GenerateParams): Promise<GenerateProviderResult> {
@@ -286,6 +293,8 @@ class ProxyAdapter implements ImageProvider {
   }
 }
 
+// 适配器注册表。type → 适配器实例，getAdapter() 通过它路由；
+// 新增厂商只需在此追加一项，task-runner 无需感知具体类型。
 const adapters: Record<AdapterType, ImageProvider> = {
   openai: new OpenAICompatAdapter(),
   flux: new FluxAdapter(),
@@ -294,6 +303,7 @@ const adapters: Record<AdapterType, ImageProvider> = {
   proxy: new ProxyAdapter(),
 };
 
+/** 按 adapter 类型获取对应的适配器实例；未注册该类型时抛错。 */
 export function getAdapter(type: AdapterType): ImageProvider {
   const a = adapters[type];
   if (!a) throw new Error(`No adapter registered for type: ${type}`);

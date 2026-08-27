@@ -4,7 +4,7 @@ import { create } from "zustand";
 import type { GenerateRequest, GenerateTask, HistoryItem, Preset } from "@/lib/types";
 
 interface StudioState {
-  // current selection (mirrors the generate form)
+  // 当前选择（与生成表单同步）
   serviceId: string | null;
   modelId: string | null;
   prompt: string;

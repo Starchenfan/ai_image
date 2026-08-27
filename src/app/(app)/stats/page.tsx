@@ -37,15 +37,37 @@ async function fetchStats() {
   return (await r.json()).stats as Stats;
 }
 
+/**
+ * fmtDuration — 把毫秒格式化成人类可读的耗时。
+ *
+ * 三段式：0 或负数 → 「—」（没数据）；< 1000ms → 「Nms」保留整数；
+ * >= 1000ms → 「N.Ns」保留 1 位小数。统计页要横向对比多行，
+ * ms 和 s 混排时用 tabular-nums 对齐，避免数字跳列。
+ */
 function fmtDuration(ms: number) {
   if (ms <= 0) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/**
+ * StatsPage — 用量统计仪表盘（/stats）。
+ *
+ * 它是「回顾」面：不产生任何生成，只把历史数据聚合后可视化。
+ * 和 /history 的区别：history 是「逐条翻」，stats 是「一眼看总量」。
+ *
+ * 三态渲染：数据未到 → StatsSkeleton 骨架屏；到了但总量为 0 → 空状态引导去创作；
+ * 有数据 → 四张统计卡 + 趋势图 + 环形图 + 两个明细表。
+ *
+ * 布局在 lg 以上锁定视口高度（100dvh - 5.75rem）并纵向可滚动，
+ * 这样四张卡 + 两个图表 + 两个明细表在一页内不会把页面顶出视口，
+ * 用户不用滚就能看到「总消费」和「模型占比」这两个最关心的数字。
+ */
 export default function StatsPage() {
+  // stats 是「聚合快照」而非实时数据：一次请求拿全部指标，不需要轮询。
+  // 默认 undefined 用来驱动首屏骨架，而不是用 data?.totalTasks === 0——
+  // 后者会把「还没请求完」和「确实一条记录都没有」混为一谈。
   const { data } = useQuery({ queryKey: ["stats"], queryFn: fetchStats });
-
   const s = data;
 
   return (
@@ -64,6 +86,12 @@ export default function StatsPage() {
         </div>
       </header>
 
+      三态渲染（由上至下判定）：
+          1. !s              → 数据还没到，渲染 StatsSkeleton，避免数字「从 0 跳到 123」的闪烁。
+          2. s.totalTasks === 0 → 没有任何生成记录，渲染空状态并引导去创作。
+          3. 否则              → 四张统计卡 + 图表 + 明细表。
+          注意 1 和 2 必须分开：不能用 totalTasks===0 同时代表「未加载」和「真为空」。
+          之所以用 !s 而不是 s.totalTasks===0 做第一层判断，是为了把「未加载」与「真为空」区分开。 */}
       {!s ? (
         <StatsSkeleton />
       ) : s.totalTasks === 0 ? (
@@ -86,7 +114,11 @@ export default function StatsPage() {
         </div>
       ) : (
         <>
-          {/* stat cards */}
+          {/* stat cards — 顶部四张大数卡片，/lg 以下 2 列、以上 4 列。
+          顺序按「用户关心程度」排：次数 → 图片 → 消费 → 耗时。
+          每张带错开 60ms 的 fade-up 入场，让数字「一块一块」浮现而不是一起亮。
+          总消费标 accent（橙色），因为「花了多少」是唯一带情绪色彩的指标，
+          其余三张是中性灰，视觉上把消费单独拎出来。 */}
           <div className="grid shrink-0 grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard icon={Activity} label="生成次数" value={s.totalTasks.toLocaleString()} delay={0} />
             <StatCard icon={ImageIcon} label="生成图片" value={s.totalImages.toLocaleString()} delay={60} />
@@ -94,13 +126,19 @@ export default function StatsPage() {
             <StatCard icon={Timer} label="平均耗时" value={fmtDuration(s.avgDurationMs)} delay={180} />
           </div>
 
-          {/* charts row — stretches to fill remaining viewport height */}
+          {/* charts row — 中段：左侧趋势图（flex-1 自适应宽度）+ 右侧环形图（固定 300px）。
+          lg 以下竖排占满宽度，因为手机上看环形图 + 趋势图并排太挤。
+          min-h-[300px] + flex-1：在 unconstrained 布局（如手机竖屏）里，
+          光靠 flex-1 会让图表塌成 0 高度，min-h 保证至少能看清坐标轴。 */}
           <div className="grid min-h-[300px] flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
             <TrendChart points={s.dailyTrend} />
             <DonutChart rows={s.byModel} />
           </div>
 
-          {/* model + service breakdown */}
+          {/* model + service breakdown — 底部两张明细表，lg 以上并排。
+          模型表带「平均耗时」列，服务表不带——耗时是模型属性（不同模型推理速度差很多），
+          服务只是路由层，拼上耗时没有意义。名称列里的进度条是「消费占比」的可视化，
+          让横向对比不用读数字也能感知谁是大头。 */}
           <div className="grid shrink-0 grid-cols-1 gap-3 lg:grid-cols-2">
             <BreakdownTable title="模型消耗" rows={s.byModel} showDuration />
             <BreakdownTable title="服务消耗" rows={s.byService} />
@@ -111,7 +149,13 @@ export default function StatsPage() {
   );
 }
 
-function StatsSkeleton() {
+/**
+   * StatsSkeleton — 数据加载中的骨架屏。结构与有数据时的布局完全一致
+   * （四张卡 + 两个图表 + 两个表），只是把数字替换成灰色块。
+   * 用 aria-hidden 挡住屏幕阅读器，避免「读出一堆无意义的骨架块」。
+   * 这样用户感知到的是「内容在生长」而非「页面在刷新」。
+   */
+  function StatsSkeleton() {
   return (
     <div className="flex flex-1 flex-col gap-4" aria-hidden>
       <div className="grid shrink-0 grid-cols-2 gap-3 lg:grid-cols-4">
@@ -133,7 +177,12 @@ function StatsSkeleton() {
 
 /* ---------------- stat card ---------------- */
 
-function StatCard({
+/**
+   * StatCard — 统计卡片。图标 + 大数字 + 小标签，标准「指标卡」形态。
+   * accent 标记（总消费）用 accent 底色，非 accent 卡 hover 时图标变深灰→黑，
+   * 给「可交互」的 hover 反馈。delay 用于入场错峰，四张卡依次出现。
+   */
+  function StatCard({
   icon: Icon,
   label,
   value,
@@ -175,7 +224,18 @@ function StatCard({
 
 type Metric = "credits" | "count";
 
-function TrendChart({ points }: { points: TrendPoint[] }) {
+/**
+   * TrendChart — 近 14 天每日趋势的柱状图。
+   *
+   * 角色：它是统计页唯一「能看趋势走向」的图表，其余都是快照。
+   * 默认显示 Credits（消费）而非次数，因为「钱」比「次数」更能说明用户的投入程度。
+   * 顶部的 toggle 让用户在两根序列间切换——同一根柱子不可能同时画两条线，
+   * 所以用 metric 状态切换数据源，而不是双 Y 轴（双轴容易误读）。
+   *
+   * 高度策略：max 取 1 兜底，避免某天数据全 0 时所有柱子塌成 0；
+   * 每根柱子最低 0.8%（或非零时最低 2%），保证 0 值那天也有一个「底座」可见。
+   */
+  function TrendChart({ points }: { points: TrendPoint[] }) {
   const [metric, setMetric] = useState<Metric>("credits");
   const [hover, setHover] = useState<number | null>(null);
 
@@ -188,7 +248,8 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
         <h2 className="text-xs font-medium uppercase tracking-wider text-ink-3">
           每日趋势
         </h2>
-        {/* metric toggle — filters which series the bars show */}
+        {/* 指标切换 toggle — 决定柱子显示哪根序列（Credits 或次数）。
+          选中项用纸色底 + 阴影，未选中项是透明底灰字，切换成本很低。 */}
         <div className="flex rounded-md border border-line p-0.5">
           {(["credits", "count"] as Metric[]).map((m) => (
             <button
@@ -207,10 +268,13 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
         </div>
       </div>
 
-      {/* plot area — stretches with the card, min height on unconstrained
-          (mobile) layouts where flex-1 alone would collapse to zero */}
+      {/* plot area — 随卡片高度伸缩的绘图区。min-h-[180px] 是刻意加的：
+          在 unconstrained 布局（如手机竖屏）里光靠 flex-1 会让图表塌成 0 高度，
+          180px 保证坐标轴和至少一根柱子能看清。 */}
       <div className="relative mt-3 min-h-[180px] flex-1">
-        {/* gridlines + y ticks */}
+        {/* gridlines + y ticks — 三条水平参考线（0% / 50% / 100%），对应 max 的 0/0.5/1。
+          0% 是实线（底线），50% 和 100% 是虚线，视觉上区分「基准线」和「刻度线」。
+          刻度值用 tabular-nums 等宽，多根柱子并排时数字不会错位。 */}
         {[0, 0.5, 1].map((t) => (
           <div
             key={t}
@@ -229,7 +293,11 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
           </div>
         ))}
 
-        {/* bars */}
+        {/* bars — 每天一根柱子，flex-1 均分宽度。hover 时该柱子上方出现一条半透明高亮带
+          （hover hit-area），同时柱子颜色从 accent 深一点到 accent/80，
+          给用户「鼠标在这根上」的反馈。
+          animate-grow-y 让柱子从 0 高度生长出来，配合 30ms 错峰，
+          14 根柱子依次出现比一起出现更易读。 */}
         <div className="absolute inset-y-0 left-9 right-0 flex items-end gap-1 sm:gap-1.5">
           {points.map((p, i) => {
             const v = p[metric];
@@ -263,7 +331,11 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
             );
           })}
 
-          {/* tooltip — anchored to the hovered bar inside the plot area */}
+          {/* tooltip — 锚定在被 hover 的柱子上方，显示当天的日期 + 两个指标的具体值。
+          位置用 left/bottom 百分比计算：left 按柱子索引均分，
+          bottom 在柱子高度之上再抬 10px，保证浮在柱子顶上不被遮挡。
+          之所以同时显示 credits 和 count：切换 metric 只改变柱子高度，
+          但 tooltip 里两个数字都给，用户不用切回去看另一根序列。 */}
           {hovered && hover !== null && (
             <div
               className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-md border border-line bg-paper-2 px-2.5 py-1.5 shadow-lift animate-fade-in"
@@ -283,7 +355,8 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
         </div>
       </div>
 
-      {/* x labels */}
+      {/* x labels — 日期轴。只显示 MM-DD（slice(5) 去掉年份），
+          奇数索引在 sm 以下隐藏，避免 14 个日期挤在一起糊成一片。 */}
       <div className="mt-1.5 flex shrink-0 gap-1 pl-9 sm:gap-1.5">
         {points.map((p, i) => (
           <span
@@ -312,7 +385,21 @@ const DONUT_COLORS = [
   "var(--color-line)",
 ];
 
-function DonutChart({ rows }: { rows: ModelStat[] }) {
+/**
+   * DonutChart — 各模型消费占比的环形图。
+   *
+   * 角色：和趋势图互补——趋势图回答「什么时候花得多」，环形图回答「花在谁身上」。
+   * 用环形而不是饼图：环中间可以放「总消费 / 当前选中模型」的读数，
+   * 饼图中间是空的，放不下这个关键数字。
+   *
+   * 实现：SVG circle 的 stroke-dasharray 做分段。每段长度 = 该模型占比，
+   * strokeDashoffset 逐段累加偏移，形成环形分段。hover 某段时线宽从 5 加到 6.5，
+   * 中心读数切换成该模型名 + 消费 + 占比，下方图例同步高亮。
+   *
+   * 为什么用消费（credits）而不是次数做占比：不同模型单次价格差几倍，
+   * 「谁花了钱」比「谁被点了几次」更有商业意义。
+   */
+  function DonutChart({ rows }: { rows: ModelStat[] }) {
   const [active, setActive] = useState<number | null>(null);
   const total = Math.max(1, rows.reduce((n, r) => n + r.credits, 0));
 
@@ -351,7 +438,9 @@ function DonutChart({ rows }: { rows: ModelStat[] }) {
             />
           ))}
         </svg>
-        {/* center readout */}
+        {/* center readout — 环形正中的三行字。默认显示「总消费 + 总额 + 模型个数」；
+          hover 某段时切换成「该模型名 + 该模型消费 + 该模型占比」。
+          pointer-events-none 是因为这层只是展示，事件要穿透到下方的 SVG 环形段。 */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <p className="max-w-[70%] truncate text-[10px] text-ink-3">
             {shown ? shown.name : "总消费"}
@@ -366,7 +455,11 @@ function DonutChart({ rows }: { rows: ModelStat[] }) {
         </div>
       </div>
 
-      {/* legend */}
+      {/* 图例 — 环形下方的可滚动列表。每行：色块 + 模型名 + 占比 + 消费金额。
+          整行都是 button，hover 时环形对应段加宽、中心读数切换成该模型，
+          让「图例 ↔ 环形」双向联动，比只 hover 环形本身更容易命中（
+          环形段是 SVG path，鼠标判定区域窄，图例行宽更容易点到）。
+          flex-1 + overflow-y-auto：模型多时图例自己滚动，不至于撑破卡片。 */}
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
         {segments.map((s, i) => (
           <button
@@ -398,7 +491,15 @@ function DonutChart({ rows }: { rows: ModelStat[] }) {
 
 /* ---------------- breakdown tables ---------------- */
 
-function BreakdownTable({
+/**
+   * BreakdownTable — 模型/服务维度的明细表。两个表共用一个组件，
+   * 差异只有「是否显示平均耗时列」（模型表有，服务表没有）。
+   *
+   * 名称列内嵌一条 mini 进度条：该行消费 / 全部行最大消费，
+   * 让横向对比不用读数字也能感知谁是大头——表格 + 条形图的双重编码。
+   * maxCredits 兜底 1 避免除以 0。
+   */
+  function BreakdownTable({
   title,
   rows,
   showDuration,

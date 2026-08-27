@@ -1,7 +1,8 @@
 /**
- * Mock task runner. Simulates a BullMQ worker consuming the generate queue.
- * Progresses a task through queued → processing → generating → completed/failed.
- * Real backend: replace with BullMQ + Redis + SSE/WebSocket fan-out.
+ * 模拟任务执行器。模拟 BullMQ worker 消费生成队列，驱动任务经历
+ * queued(排队中) → processing(调用 AI 模型) → generating(生成图片中) →
+ * completed(完成) / failed(生成失败)。
+ * 真实后端替换为 BullMQ + Redis + SSE/WebSocket 推送。
  */
 import { db } from "./db";
 import { getAdapter } from "./adapters";
@@ -13,7 +14,7 @@ function assert(v: unknown, msg: string): asserts v {
   if (!v) throw new Error(msg);
 }
 
-/** Create a task and kick off background processing. Returns the task. */
+/** 创建任务并启动后台异步处理，返回该任务。 */
 export function enqueueTask(params: GenerateParams): GenerateTask {
   const { model, service, count } = params;
   assert(model, "model missing");
@@ -58,7 +59,7 @@ async function runTask(taskId: string, params: GenerateParams): Promise<void> {
   };
 
   try {
-    // queued → processing
+    // 状态流转：queued → processing
     await wait(400);
     patch({
       status: "processing",
@@ -67,7 +68,7 @@ async function runTask(taskId: string, params: GenerateParams): Promise<void> {
       startedAt: Date.now(),
     });
 
-    // processing → generating (animate progress)
+    // 状态流转：processing → generating（动画填充进度）
     patch({ status: "generating", stage: "生成图片中", progress: 28 });
     const total = Math.min(params.model.avgDurationSec * 1000, 12000);
     const ticks = 8;
@@ -119,8 +120,8 @@ function pushHistory(task: GenerateTask) {
     negativePrompt: task.request.negativePrompt,
     modelName: task.model?.displayName ?? "Unknown",
     serviceName: task.service?.name ?? "Unknown",
-    // Ids too — name matching breaks the moment a model is renamed, and
-    // "reuse these params" needs the exact ids to refill the form.
+    // 同时记录 ID——一旦模型改名，仅靠名称匹配会失效；
+    // 「复用这些参数」需要精确的 ID 才能回填表单。
     serviceId: task.request.serviceId,
     modelId: task.request.modelId,
     seed: task.request.seed,

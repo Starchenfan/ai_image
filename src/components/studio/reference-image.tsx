@@ -4,6 +4,16 @@ import { useRef } from "react";
 import { ImagePlus, X } from "lucide-react";
 import { useStudio } from "@/lib/store";
 
+/**
+ * 参考图上传 — 工作台表单组件。
+ *
+ * 可选的「图生图」参考图：上传一张图片存为 data URL 写入 store，
+ * 生成时随请求一起发给 adapter 做图像到图像的生成。支持移除，
+ * 未上传时显示虚线上传框。
+ *
+ * 交互对象：
+ *   - useStudio store（referenceImage / set）
+ */
 export function ReferenceImageUpload() {
   const referenceImage = useStudio((s) => s.referenceImage);
   const set = useStudio((s) => s.set);

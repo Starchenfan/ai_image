@@ -1,10 +1,16 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+/**
+ * Merge class names with tailwind-merge. Drop-in for the shadcn `cn`:
+ * clsx resolves the list, twMerge then resolves Tailwind conflicts
+ * (last wins) so order-independent merges behave.
+ */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Human "time ago" string. Falls back to a locale date past a week. */
 export function formatRelativeTime(date: Date | number): string {
   const t = typeof date === "number" ? date : date.getTime();
   const diff = Date.now() - t;
@@ -19,11 +25,13 @@ export function formatRelativeTime(date: Date | number): string {
   return new Date(t).toLocaleDateString();
 }
 
+/** Format a millisecond duration as `12.3s` (or `840ms` under a second). */
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Short random id, prefixed. E.g. `task_4f8a2c1e`. Not crypto-grade. */
 export function uid(prefix = "id"): string {
   // Math.random forbidden in workflow scripts, but fine in app runtime.
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;

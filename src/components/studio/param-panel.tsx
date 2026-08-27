@@ -8,6 +8,20 @@ import { Label } from "@/components/ui/label";
 import { Dices } from "lucide-react";
 import type { AiModel } from "@/lib/types";
 
+/**
+ * 图片参数面板 — 工作台表单组件。
+ *
+ * 提供生成图片的四个可调参数：
+ *   - 比例：6 种预设，点击切换 aspectRatio
+ *   - 尺寸：从当前模型的 supportedSizes 派生芯片，支持「自定义」输入
+ *   - 生成数量：受模型 maxBatch 上限约束，maxBatch=1 时不可选
+ *   - Seed：可留空表示随机（-1），点骰子按钮重置为随机
+ * 所有值都来自当前模型的能力声明，不支持的选项不会出现。
+ *
+ * 交互对象：
+ *   - useStudio store（aspectRatio / size / count / seed / set）
+ *   - /api/models/:id 路由（GET，获取当前模型的 supportedSizes / maxBatch）
+ */
 const RATIOS: { v: string; w: number; h: number }[] = [
   { v: "1:1", w: 1, h: 1 },
   { v: "16:9", w: 16, h: 9 },
@@ -28,8 +42,8 @@ export function ParamPanel() {
   const { aspectRatio, size, count, seed, set } = useStudio();
   const modelId = useStudio((s) => s.modelId);
 
-  // Read the current model so the Size chips reflect what the provider
-  // actually supports (high-res options live here).
+  // 读取当前模型，好让 Size 芯片只展示该服务真实支持的分辨率
+  // （高清选项（>=1536）由这里决定，标记为 HD）。
   const { data: model } = useQuery({
     queryKey: ["model", modelId],
     queryFn: () => fetchModel(modelId!),
@@ -43,17 +57,16 @@ export function ParamPanel() {
       : ["512x512", "768x768", "1024x1024", "1536x1024"];
   }, [model]);
 
-  // maxBatch = max images per single provider request. Only show count
-  // options up to the provider's real batch ceiling — no faking by looping.
+  // maxBatch = 单次请求该服务能生成的最大图片数。
+  // 数量选项只展示到真实的批量上限为止，不靠循环伪造更高的选项。
   const maxBatch = model?.maxBatch ?? 1;
   const counts = useMemo(
     () => COUNT_PRESETS.filter((c) => c <= maxBatch),
     [maxBatch]
   );
 
-  // Pull current model's supported ratios/sizes from store-level state.
-  // We read from the models query via the parent; here we just use whatever
-  // the store holds — ModelSelect enforces validity on model switch.
+  // 比例/尺寸的合法性由 ModelSelect 在模型切换时写入 store 并校验，
+  // 这里直接读 store 的当前值即可，不必再向模型查询。
   return (
     <section className="space-y-4">
       <h3 className="px-1 text-xs font-medium uppercase tracking-wider text-ink-3">

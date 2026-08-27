@@ -14,6 +14,19 @@ import {
 import type { GenerateTask, GeneratedImage } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
+/**
+ * 全屏图片查看器 — 工作台展示组件。
+ *
+ * 点击结果网格的图片后以全屏模态打开，支持：
+ *   - 键盘快捷键：Esc 关闭、左右键切图
+ *   - 缩放切换（ZoomIn / ZoomOut）、全屏
+ *   - 下载（fetch-as-blob 优先，失败退化为跳转）
+ *   - 复制 Prompt 到剪贴板
+ * 底部展示该任务的 Prompt 与全部参数（模型/服务/尺寸/比例/Seed/动态参数）。
+ *
+ * 交互对象：
+ *   - 父组件 ResultGrid（传入 images / index / task 与回调）
+ */
 export function ImageViewer({
   images,
   index,
@@ -51,7 +64,7 @@ export function ImageViewer({
       className="fixed inset-0 z-50 flex flex-col bg-black/90 backdrop-blur-md animate-fade-in"
       onClick={onClose}
     >
-      {/* top bar */}
+      {/* 顶栏 */}
       <div
         className="flex items-center justify-between p-4 text-ink-2"
         onClick={(e) => e.stopPropagation()}
@@ -102,7 +115,7 @@ export function ImageViewer({
         </div>
       </div>
 
-      {/* image area */}
+      {/* 图片区域 */}
       <div
         className="relative flex flex-1 items-center justify-center overflow-hidden px-16"
         onClick={onClose}
@@ -141,7 +154,7 @@ export function ImageViewer({
         )}
       </div>
 
-      {/* prompt + params */}
+      {/* Prompt 与参数 */}
       <div
         className="border-t border-white/10 p-4 text-xs"
         onClick={(e) => e.stopPropagation()}

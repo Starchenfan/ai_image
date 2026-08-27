@@ -4,14 +4,14 @@ import type { GenerateTask, GeneratedImage, HistoryItem } from "./types";
 import { readImage, optimizeImageForStorage, imageFileExtension } from "./image-utils";
 
 /**
- * Local file-system fallback for when MySQL is not configured.
+ * 本地文件系统回退方案，用于未配置 MySQL 的场景。
  *
- *   public/generated-images/<image_id>.<ext>   — the image bytes, served
- *                                                statically at /generated-images/...
- *   .studio/generated/<task_id>.json            — one HistoryItem per task
+ *   public/generated-images/<image_id>.<ext>   — 图片字节，由 Next.js
+ *                                                静态服务于 /generated-images/...
+ *   .studio/generated/<task_id>.json            — 每个任务对应一个 HistoryItem
  *
- * Both dirs are gitignored. No API route is needed for the images: Next.js
- * serves public/ as-is, so the rewritten URL points straight at the file.
+ * 两个目录均已加入 gitignore。图片无需额外 API 路由：Next.js 直接按
+ * public/ 的原样提供静态文件服务，因此重写后的 URL 直接指向文件。
  */
 
 const IMAGES_DIR = path.join(process.cwd(), "public", "generated-images");
@@ -57,12 +57,12 @@ async function deleteImageFiles(imageIds: string[]): Promise<void> {
       const match = files.find((f) => f.startsWith(`${id}.`));
       if (match) await fs.unlink(path.join(IMAGES_DIR, match));
     } catch {
-      /* ignore — a missing image file is not a failure */
+      /* 忽略 —— 图片文件不存在不算失败 */
     }
   }
 }
 
-/** Write generated images to disk + record the task as a HistoryItem. */
+/** 将生成的图片写入磁盘，并把该任务记录为一条 HistoryItem。 */
 export async function persistGeneratedImagesLocal(
   task: GenerateTask,
   images: GeneratedImage[]
@@ -107,8 +107,8 @@ export async function persistGeneratedImagesLocal(
   return out;
 }
 
-/** Read every persisted task, newest first. Returns null on read failure so
- *  callers can fall back to the in-memory history. */
+/** 读取所有已持久化的任务，按创建时间倒序（最新在前）。读取失败时返回 null，
+ *  以便调用方回退到内存中的历史记录。 */
 export async function listPersistedHistoryLocal(): Promise<HistoryItem[] | null> {
   try {
     await ensureDirs();
@@ -124,10 +124,12 @@ export async function listPersistedHistoryLocal(): Promise<HistoryItem[] | null>
   }
 }
 
+/** 按 taskId 从磁盘读取单条已持久化的历史记录，不存在时返回 null。 */
 export async function getPersistedHistoryItemLocal(taskId: string) {
   return readMeta(taskId);
 }
 
+/** 更新指定任务的收藏状态。若任务不存在则返回 false，否则写回磁盘并返回 true。 */
 export async function setPersistedFavoriteLocal(taskId: string, favorite: boolean) {
   const item = await readMeta(taskId);
   if (!item) return false;
@@ -136,6 +138,7 @@ export async function setPersistedFavoriteLocal(taskId: string, favorite: boolea
   return true;
 }
 
+/** 删除指定任务的历史记录及其所有图片文件。任务不存在时返回 false。 */
 export async function deletePersistedHistoryLocal(taskId: string) {
   const item = await readMeta(taskId);
   if (!item) return false;
@@ -144,7 +147,7 @@ export async function deletePersistedHistoryLocal(taskId: string) {
   return true;
 }
 
-/** Read a persisted image by id (used by /api/images/[id] when MySQL is on). */
+/** 按 id 读取已持久化的图片（MySQL 启用时由 /api/images/[id] 路由使用）。 */
 export async function getPersistedImageLocal(id: string) {
   try {
     await fs.mkdir(IMAGES_DIR, { recursive: true });

@@ -1,29 +1,29 @@
 /**
- * Core domain types for the multi-service + multi-model + adapter system.
- * Nothing about a specific provider is hard-coded here.
+ * 核心领域类型：多服务 + 多模型 + 适配器系统。
+ * 此处不硬编码任何具体厂商的实现细节——新增厂商只加适配器，类型层不动。
  */
 
 export type ServiceStatus = "online" | "offline" | "degraded" | "rate_limited" | "maintenance";
 export type AdapterType = "openai" | "flux" | "stable_diffusion" | "custom" | "proxy";
 
-/** A configured third-party image API endpoint. */
+/** 已配置的第三方图像 API 端点。 */
 export interface AiService {
   id: string;
   name: string;
-  /** Which adapter handles this service. */
+  /** 处理该服务的适配器类型。 */
   adapterType: AdapterType;
   baseUrl: string;
-  /** Stored server-side only; never serialized to the client. */
+  /** 脱敏后的 API Key 展示值，仅服务端持有，不会序列化到客户端。 */
   apiKeyMasked: string;
   status: ServiceStatus;
-  /** Simulated latency in ms, for display. */
+  /** 模拟延迟（毫秒），仅用于界面展示。 */
   latencyMs: number;
   recommended?: boolean;
   tags?: string[];
   createdAt: string;
 }
 
-/** Parameter schema field — frontend renders UI from this. */
+/** 参数 schema 字段——前端据此渲染参数表单 UI。 */
 export interface ModelParameterSchema {
   key: string;
   type: "number" | "select" | "text" | "boolean" | "slider";
@@ -34,12 +34,12 @@ export interface ModelParameterSchema {
   step?: number;
   default?: number | string | boolean;
   options?: Array<number | string>;
-  /** group lets the UI collapse related params (basic / advanced / sampler). */
+  /** group：让 UI 把相关参数折叠到同一组（basic 基础 / advanced 高级 / sampler 采样器）。 */
   group?: "basic" | "advanced" | "sampler" | "quality";
-  /** hide behind "Advanced" toggle */
+  /** 是否隐藏在「高级」折叠面板之后。 */
   advanced?: boolean;
-  /** Render no control — the field is declared so the adapter forwards it
-   * (e.g. `seed`), but the UI supplies it elsewhere. */
+  /** 不渲染任何控件——声明该字段是为了让适配器透传它（例如 `seed`），
+   * 但 UI 会从别处（如顶部 seed 输入框）提供该值。 */
   hidden?: boolean;
 }
 
@@ -49,27 +49,27 @@ export interface ModelCapabilities {
   inpainting: boolean;
   negativePrompt: boolean;
   variations: boolean;
-  /** How the provider's `size` string is ordered. Default "width_first". */
+  /** 提供商标识 size 字符串的顺序。默认 "width_first"（宽在前）。 */
   sizeFormat?: "width_first" | "height_first";
 }
 
-/** A model exposed by a service. Parameters are schema-driven, never hard-coded. */
+/** 服务对外暴露的一个模型。参数由 schema 驱动，绝不硬编码。 */
 export interface AiModel {
   id: string;
   serviceId: string;
   displayName: string;
-  modelId: string; // the value sent to the provider
+  modelId: string; // 实际发送给厂商的模型标识值
   description: string;
   type: "image";
   capabilities: ModelCapabilities;
-  /** Schema for every parameter the frontend should render. */
+  /** 前端应当渲染的所有参数的 schema。 */
   parameters: ModelParameterSchema[];
-  supportedAspectRatios: string[]; // e.g. ["1:1","16:9"]
-  supportedSizes: string[]; // e.g. ["1024x1024"]
-  maxBatch: number; // max images per request
+  supportedAspectRatios: string[]; // 支持的宽高比，例如 ["1:1","16:9"]
+  supportedSizes: string[]; // 支持的尺寸，例如 ["1024x1024"]
+  maxBatch: number; // 单次请求最多生成图片数
   priceCredits: number;
   avgDurationSec: number;
-  rating?: number; // 0-5
+  rating?: number; // 评分 0-5
   tags?: string[];
   enabled: boolean;
   sort: number;
@@ -84,7 +84,7 @@ export interface PromptTemplate {
   tags?: string[];
 }
 
-/** A generation request the client sends. */
+/** 客户端发送的生成请求。 */
 export interface GenerateRequest {
   serviceId: string;
   modelId: string;
@@ -93,13 +93,13 @@ export interface GenerateRequest {
   count: number;
   aspectRatio: string;
   size: string;
-  seed: number; // -1 = random
+  seed: number; // -1 表示随机
   parameters: Record<string, number | string | boolean>;
-  /** Base64 data URL of a reference image for image-to-image. */
+  /** 用于图生图的参考图，Base64 data URL。 */
   referenceImage?: string;
 }
 
-/** A saved generation recipe — full parameter set reusable in one click. */
+/** 保存的生成配方——完整的参数集，一键即可复用。 */
 export interface Preset {
   id: string;
   name: string;
@@ -115,6 +115,7 @@ export interface Preset {
   createdAt: number;
 }
 
+/** 任务状态机：queued(排队中) → processing(调用 AI 模型) → generating(生成图片中) → completed(完成) / failed(失败) / canceled(已取消)。 */
 export type TaskStatus =
   | "queued"
   | "processing"
@@ -134,8 +135,8 @@ export interface GeneratedImage {
 export interface GenerateTask {
   id: string;
   status: TaskStatus;
-  progress: number; // 0-100
-  stage: string; // human label
+  progress: number; // 进度 0-100
+  stage: string; // 人类可读的阶段标签
   request: GenerateRequest;
   model?: AiModel;
   service?: AiService;
@@ -155,11 +156,11 @@ export interface HistoryItem {
   negativePrompt?: string;
   modelName: string;
   serviceName: string;
-  /** Ids of the service / model that produced this. Optional: rows written
-   *  before these columns existed only carry the display names. */
+  /** 产出该历史记录的服务/模型 ID。可选：历史表早期写入的行（这些列尚不存在时）
+   *  只保存了展示名称。 */
   serviceId?: string;
   modelId?: string;
-  /** The requested seed (-1 = random). Per-image seeds live on `images[]`. */
+  /** 请求时指定的种子（-1 = 随机）。每张图的实际种子记录在 `images[]` 中。 */
   seed?: number;
   aspectRatio: string;
   size: string;
@@ -172,7 +173,7 @@ export interface HistoryItem {
   parameters: Record<string, number | string | boolean>;
 }
 
-/** Interface every third-party adapter implements. New provider → new adapter, no frontend change. */
+/** 每个第三方适配器都需实现的接口。接入新厂商只需新增一个适配器，前端无需改动。 */
 export interface ImageProvider {
   readonly adapterType: AdapterType;
   generate(params: GenerateParams): Promise<GenerateProviderResult>;
@@ -190,9 +191,9 @@ export interface GenerateParams {
   size: string;
   seed: number;
   parameters: Record<string, number | string | boolean>;
-  /** Base64 data URL of a reference image for image-to-image. */
+  /** 用于图生图的参考图，Base64 data URL。 */
   referenceImage?: string;
-  /** Real API key — injected server-side, never stored on the task / never serialized to client. */
+  /** 真实 API Key——由服务端注入，不保存到任务对象，也不会序列化到客户端。 */
   apiKey?: string;
 }
 

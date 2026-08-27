@@ -17,12 +17,15 @@ import { Input } from "@/components/ui/input";
 import type { ModelParameterSchema } from "@/lib/types";
 
 /**
- * Renders one field from the model's parameter schema.
- * type === number  → numeric input
- * type === select  → radix select
- * type === slider  → radix slider
- * type === boolean → checkbox (none in seed data, but supported)
- * type === text    → text input
+ * 动态参数字段 — 工作台表单组件。
+ *
+ * 根据 ModelParameterSchema 的 type 字段渲染对应的输入控件：
+ *   - number → 数字输入框（带 min/max/step）
+ *   - slider → 滑块 + 右侧数值显示
+ *   - select → 下拉选择（Radix Select）
+ *   - boolean → 自定义开关（seed data 中暂无，但已支持）
+ *   - text   → 文本输入框
+ * 字段值通过 useStudio store 的 parameters[field.key] 读写。
  */
 export function DynamicField({ field }: { field: ModelParameterSchema }) {
   const value = useStudio((s) => s.parameters[field.key]);
@@ -138,15 +141,22 @@ export function DynamicField({ field }: { field: ModelParameterSchema }) {
   );
 }
 
-/** Advanced params wrapper — collapses fields flagged advanced behind a toggle. */
+/**
+ * 高级参数包装器 — 工作台表单组件。
+ *
+ * 把 ModelParameterSchema 列表按 hidden / advanced 分组：
+ *   - hidden 字段不渲染任何控件，仅用于告知 adapter 需要透传（如 seed）
+ *   - 非 advanced 的字段直接渲染
+ *   - advanced 字段折叠在「高级参数 (N)」展开按钮后
+ */
 export function AdvancedParams({
   fields,
 }: {
   fields: ModelParameterSchema[];
 }) {
   const [open, setOpen] = useState(false);
-  // Hidden fields are declared so the adapter knows to forward them (e.g. seed),
-  // but the UI supplies them elsewhere — never render a control for them.
+  // hidden 字段不渲染控件：它们的存在只是为了让 adapter 知道要透传该字段
+  // （如 seed），实际值由 UI 其它地方提供。
   const visible = fields.filter((f) => !f.hidden);
   const basic = visible.filter((f) => !f.advanced);
   const advanced = visible.filter((f) => f.advanced);

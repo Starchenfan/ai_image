@@ -7,6 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Coins } from "lucide-react";
 import type { AiModel } from "@/lib/types";
 
+/**
+ * 生成按钮 — 工作台表单组件。
+ *
+ * 点击后回调 onGenerate（由父组件负责提交生成任务）。按钮状态受
+ * activeTaskId 控制：有进行中的任务时禁用并显示「生成中…」。
+ * 下方实时显示本次生成预计消耗的 Credits（模型单价 × 数量）与所选模型名。
+ *
+ * 交互对象：
+ *   - useStudio store（modelId / count / prompt / activeTaskId）
+ *   - /api/models/:id 路由（GET，获取 priceCredits）
+ */
 async function fetchModel(id: string) {
   const r = await fetch(`/api/models/${id}`);
   return (await r.json()).model as AiModel;

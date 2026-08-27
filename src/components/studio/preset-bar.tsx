@@ -7,6 +7,18 @@ import { useStudio } from "@/lib/store";
 import { Input } from "@/components/ui/input";
 import type { Preset } from "@/lib/types";
 
+/**
+ * 配方栏 — 工作台表单组件。
+ *
+ * 保存/加载生成配方（prompt + 参数 + 模型 + 比例/尺寸/数量）。
+ * 「保存当前」把当前表单 POST 到 /api/presets，列表项点击即应用到 store，
+ * 删除调用 /api/presets/:id。保存前必须已选择服务与模型。
+ *
+ * 交互对象：
+ *   - useStudio store（applyPreset 及各表单字段）
+ *   - TanStack Query 缓存（queryKey: ["presets"]）
+ *   - /api/presets 路由（GET / POST / DELETE :id）
+ */
 async function fetchPresets() {
   const r = await fetch("/api/presets");
   return (await r.json()).presets as Preset[];
