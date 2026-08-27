@@ -150,6 +150,12 @@ export interface HistoryItem {
   negativePrompt?: string;
   modelName: string;
   serviceName: string;
+  /** Ids of the service / model that produced this. Optional: rows written
+   *  before these columns existed only carry the display names. */
+  serviceId?: string;
+  modelId?: string;
+  /** The requested seed (-1 = random). Per-image seeds live on `images[]`. */
+  seed?: number;
   aspectRatio: string;
   size: string;
   count: number;

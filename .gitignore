@@ -3,6 +3,7 @@
 
 # Next.js build output
 /.next/
+/.next-probe/
 /.next.conflict-*/
 /out/
 
@@ -47,3 +48,4 @@ Desktop.ini
 .history/
 /.history/
 .npm-cache/
+

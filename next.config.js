@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Defaults to .next. Override to run a second server (probe / prod smoke)
+  // without clobbering the build output a running dev server is serving from.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   experimental: {
     optimizePackageImports: ["lucide-react"],
   },

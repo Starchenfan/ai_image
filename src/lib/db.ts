@@ -98,7 +98,10 @@ const seedModels: AiModel[] = [
       textToImage: true,
       imageToImage: false,
       inpainting: false,
-      negativePrompt: true,
+      // 基元律动 gateway 400s on ANY key outside {model,prompt,n,size} —
+      // probed live: adding negative_prompt returns
+      // {"code":"BAD_REQUEST","message":"请求包含未知字段"}.
+      negativePrompt: false,
       variations: false,
     },
     parameters: [],
@@ -123,7 +126,8 @@ const seedModels: AiModel[] = [
       textToImage: true,
       imageToImage: false,
       inpainting: false,
-      negativePrompt: true,
+      // Same gateway, same strict field allowlist — see qwen-image-2.0 above.
+      negativePrompt: false,
       variations: false,
     },
     parameters: [],

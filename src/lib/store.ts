@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { GenerateRequest, GenerateTask, Preset } from "@/lib/types";
+import type { GenerateRequest, GenerateTask, HistoryItem, Preset } from "@/lib/types";
 
 interface StudioState {
   // current selection (mirrors the generate form)
@@ -22,6 +22,10 @@ interface StudioState {
   compareIds: string[];
   // image-to-image reference (base64 data URL)
   referenceImage: string | null;
+  /** modelId whose one-time "reset params to schema defaults" should be
+   *  skipped, because a preset / history recipe just filled the form with real
+   *  values. ModelSelect clears it after honoring it. */
+  pendingRecipeFor: string | null;
   // last results for the grid
   results: GenerateTask | null;
 
@@ -33,6 +37,9 @@ interface StudioState {
   buildRequest: () => GenerateRequest | null;
   toggleCompare: (id: string) => void;
   applyPreset: (p: Preset) => void;
+  /** Refill the form from a past generation. `lockSeed` reuses that run's
+   *  exact seed so the output is reproducible instead of re-rolled. */
+  applyHistoryItem: (h: HistoryItem, opts?: { lockSeed?: boolean }) => void;
 }
 
 export const useStudio = create<StudioState>((set, get) => ({
@@ -51,6 +58,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   compareMode: false,
   compareIds: [],
   referenceImage: null,
+  pendingRecipeFor: null,
   results: null,
 
   set: (k, v) => set({ [k]: v } as Pick<StudioState, typeof k>),
@@ -91,6 +99,30 @@ export const useStudio = create<StudioState>((set, get) => ({
       size: p.size,
       seed: p.seed,
       parameters: p.parameters,
+      pendingRecipeFor: p.modelId,
+    });
+  },
+
+  applyHistoryItem: (h, opts) => {
+    const s = get();
+    // Rows written before the id columns existed only carry display names —
+    // fall back to whatever is selected so the prompt/size still transfer.
+    const modelId = h.modelId ?? s.modelId;
+    // Prefer the seed the provider actually used (per image); the request seed
+    // is -1 whenever the run was randomized, which reproduces nothing.
+    const usedSeed = h.images[0]?.seed ?? h.seed ?? -1;
+    set({
+      serviceId: h.serviceId ?? s.serviceId,
+      modelId,
+      prompt: h.prompt,
+      negativePrompt: h.negativePrompt ?? "",
+      count: h.count,
+      aspectRatio: h.aspectRatio,
+      size: h.size,
+      seed: opts?.lockSeed ? usedSeed : h.seed ?? -1,
+      parameters: h.parameters ?? {},
+      showNegative: Boolean(h.negativePrompt),
+      pendingRecipeFor: modelId,
     });
   },
 }));

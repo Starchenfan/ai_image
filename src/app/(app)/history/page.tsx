@@ -11,6 +11,8 @@ import {
   Download,
   Search,
   ImageIcon,
+  SlidersHorizontal,
+  ClipboardCopy,
 } from "lucide-react";
 import type { HistoryItem } from "@/lib/types";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/cn";
@@ -27,12 +29,60 @@ async function fetchHistory(filter: Filter) {
   return (await r.json()).items as HistoryItem[];
 }
 
+/** The full recipe behind one run — enough to reproduce it elsewhere. */
+function recipeJson(h: HistoryItem) {
+  return JSON.stringify(
+    {
+      prompt: h.prompt,
+      negativePrompt: h.negativePrompt,
+      service: h.serviceName,
+      model: h.modelName,
+      serviceId: h.serviceId,
+      modelId: h.modelId,
+      aspectRatio: h.aspectRatio,
+      size: h.size,
+      count: h.count,
+      requestedSeed: h.seed ?? -1,
+      seeds: h.images.map((i) => i.seed),
+      parameters: h.parameters,
+    },
+    null,
+    2
+  );
+}
+
+/** Images are stored as WebP or PNG — never SVG. Take the real extension when
+ *  the URL carries one, otherwise fall back to png. */
+function downloadName(h: HistoryItem, url: string) {
+  const ext = /\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i.exec(url)?.[1] ?? "png";
+  return `huijie-${h.id}.${ext.toLowerCase()}`;
+}
+
 export default function HistoryPage() {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const qc = useQueryClient();
   const set = useStudio((s) => s.set);
+  const applyHistoryItem = useStudio((s) => s.applyHistoryItem);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Refill the studio form from a past run and jump back to it. Seed is locked
+  // to the one the provider actually used, so the run is reproducible.
+  const reuse = (h: HistoryItem) => {
+    applyHistoryItem(h, { lockSeed: true });
+    router.push("/");
+  };
+
+  const copyRecipe = async (h: HistoryItem) => {
+    try {
+      await navigator.clipboard.writeText(recipeJson(h));
+      setCopiedId(h.id);
+      setTimeout(() => setCopiedId((cur) => (cur === h.id ? null : cur)), 1600);
+    } catch {
+      // Clipboard is unavailable outside a secure context — nothing to undo.
+    }
+  };
 
   const { data: items = [] } = useQuery({
     queryKey: ["history", filter],
@@ -170,6 +220,11 @@ export default function HistoryPage() {
               {/* actions */}
               <div className="flex items-center gap-1 border-t border-line px-2 py-1.5">
                 <ActionBtn
+                  icon={SlidersHorizontal}
+                  label="复用参数（回到工作台，锁定 seed）"
+                  onClick={() => reuse(h)}
+                />
+                <ActionBtn
                   icon={RefreshCw}
                   label="重试"
                   loading={retry.isPending}
@@ -181,14 +236,21 @@ export default function HistoryPage() {
                   active={h.favorite}
                   onClick={() => toggleFav.mutate({ id: h.id, fav: !h.favorite })}
                 />
+                <ActionBtn
+                  icon={ClipboardCopy}
+                  label={copiedId === h.id ? "已复制参数 JSON" : "复制参数 JSON"}
+                  active={copiedId === h.id}
+                  onClick={() => copyRecipe(h)}
+                />
                 {h.images[0] && (
                   <ActionBtn
                     icon={Download}
                     label="下载"
                     onClick={() => {
+                      const url = h.images[0].url;
                       const a = document.createElement("a");
-                      a.href = h.images[0].url;
-                      a.download = `history-${h.id}.svg`;
+                      a.href = url;
+                      a.download = downloadName(h, url);
                       a.click();
                     }}
                   />

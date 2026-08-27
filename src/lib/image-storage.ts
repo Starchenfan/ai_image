@@ -49,6 +49,9 @@ async function ensureSchema() {
         negative_prompt TEXT NULL,
         model_name VARCHAR(255) NULL,
         service_name VARCHAR(255) NULL,
+        service_id VARCHAR(64) NULL,
+        model_id VARCHAR(64) NULL,
+        request_seed BIGINT NULL,
         aspect_ratio VARCHAR(32) NULL,
         image_size VARCHAR(32) NULL,
         parameters JSON NULL,
@@ -68,6 +71,9 @@ async function ensureSchema() {
         negative_prompt: "TEXT NULL",
         model_name: "VARCHAR(255) NULL",
         service_name: "VARCHAR(255) NULL",
+        service_id: "VARCHAR(64) NULL",
+        model_id: "VARCHAR(64) NULL",
+        request_seed: "BIGINT NULL",
         aspect_ratio: "VARCHAR(32) NULL",
         image_size: "VARCHAR(32) NULL",
         parameters: "JSON NULL",
@@ -166,15 +172,18 @@ export async function persistGeneratedImages(
         await pool.execute(
           `INSERT INTO generated_images (
             id, task_id, file_path, mime_type, width, height, seed, image_data,
-            prompt, negative_prompt, model_name, service_name, aspect_ratio,
+            prompt, negative_prompt, model_name, service_name, service_id,
+            model_id, request_seed, aspect_ratio,
             image_size, parameters, cost_credits, duration_ms, favorite, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             file_path = VALUES(file_path), mime_type = VALUES(mime_type),
             width = VALUES(width), height = VALUES(height), seed = VALUES(seed),
             image_data = VALUES(image_data), prompt = VALUES(prompt),
             negative_prompt = VALUES(negative_prompt), model_name = VALUES(model_name),
-            service_name = VALUES(service_name), aspect_ratio = VALUES(aspect_ratio),
+            service_name = VALUES(service_name), service_id = VALUES(service_id),
+            model_id = VALUES(model_id), request_seed = VALUES(request_seed),
+            aspect_ratio = VALUES(aspect_ratio),
             image_size = VALUES(image_size), parameters = VALUES(parameters),
             cost_credits = VALUES(cost_credits), duration_ms = VALUES(duration_ms)`,
           [
@@ -190,6 +199,9 @@ export async function persistGeneratedImages(
             task.request.negativePrompt || null,
             task.model?.displayName || "Unknown",
             task.service?.name || "Unknown",
+            task.request.serviceId || null,
+            task.request.modelId || null,
+            task.request.seed ?? null,
             task.request.aspectRatio,
             task.request.size,
             JSON.stringify(task.request.parameters),
@@ -221,6 +233,9 @@ type HistoryRow = RowDataPacket & {
   negative_prompt: string | null;
   model_name: string | null;
   service_name: string | null;
+  service_id: string | null;
+  model_id: string | null;
+  request_seed: number | string | null;
   aspect_ratio: string | null;
   image_size: string | null;
   parameters: unknown;
@@ -249,7 +264,8 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
     const [rows] = await getPool().query<HistoryRow[]>(`SELECT
       id, task_id, file_path, mime_type, width, height, seed,
       image_data IS NOT NULL AS has_image_data, prompt, negative_prompt,
-      model_name, service_name, aspect_ratio, image_size, parameters,
+      model_name, service_name, service_id, model_id, request_seed,
+      aspect_ratio, image_size, parameters,
       cost_credits, duration_ms, favorite, created_at
       FROM generated_images
       ORDER BY created_at DESC, task_id, id`);
@@ -263,6 +279,9 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
         negativePrompt: row.negative_prompt || undefined,
         modelName: row.model_name || "Unknown",
         serviceName: row.service_name || "Unknown",
+        serviceId: row.service_id || undefined,
+        modelId: row.model_id || undefined,
+        seed: row.request_seed === null ? undefined : Number(row.request_seed),
         aspectRatio: row.aspect_ratio || "1:1",
         size: row.image_size || `${row.width}x${row.height}`,
         count: 0,

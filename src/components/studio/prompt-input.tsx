@@ -13,6 +13,7 @@ import {
   LayoutGrid,
 } from "lucide-react";
 import { useStudio } from "@/lib/store";
+import { useSelectedModel } from "@/lib/use-models";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +52,11 @@ export function PromptInput() {
   const negativePrompt = useStudio((s) => s.negativePrompt);
   const showNegative = useStudio((s) => s.showNegative);
   const set = useStudio((s) => s.set);
+  // The upstream field is opt-in per model — some relays (基元律动) 400 on it,
+  // so those models declare negativePrompt: false and the adapter drops it.
+  // Reflect that here instead of letting the user type into a dead box.
+  const model = useSelectedModel();
+  const negativeSupported = model?.capabilities.negativePrompt ?? true;
   const [optimizing, setOptimizing] = useState(false);
   const [polishError, setPolishError] = useState<string | null>(null);
 
@@ -189,12 +195,20 @@ export function PromptInput() {
       <div>
         <button
           onClick={() => set("showNegative", !showNegative)}
-          className="flex items-center gap-1 px-1 text-xs text-ink-3 transition-colors hover:text-ink-2"
+          disabled={!negativeSupported}
+          title={
+            negativeSupported
+              ? undefined
+              : `${model?.displayName ?? "该模型"} 不支持反向提示词`
+          }
+          className="flex items-center gap-1 px-1 text-xs text-ink-3 transition-colors hover:text-ink-2 disabled:pointer-events-none disabled:opacity-40"
         >
           <HistoryIcon className="h-3 w-3" />
-          {showNegative ? "隐藏" : "高级设置"} · 反向提示词
+          {negativeSupported
+            ? `${showNegative ? "隐藏" : "高级设置"} · 反向提示词`
+            : "反向提示词 · 该模型不支持"}
         </button>
-        {showNegative && (
+        {showNegative && negativeSupported && (
           <div className="mt-1.5 animate-fade-in">
             <Textarea
               value={negativePrompt}

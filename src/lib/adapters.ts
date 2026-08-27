@@ -26,6 +26,20 @@ async function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * True for the 400 a strict relay returns when the body carries a key outside
+ * its allowlist (基元律动: `{"code":"BAD_REQUEST","message":"请求包含未知字段"}`).
+ * Used to retry core-only instead of failing the task when a model's declared
+ * capabilities / parameter schema over-promise what the upstream accepts.
+ */
+function isUnknownFieldError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : "";
+  return (
+    msg.includes("400") &&
+    /未知字段|未知参数|unknown field|unknown_parameter|unrecognized|extra fields/i.test(msg)
+  );
+}
+
 /** Shared mock generation — returns deterministic-ish placeholder images. */
 async function mockGenerate(
   params: GenerateParams,
@@ -77,12 +91,15 @@ class OpenAICompatAdapter implements ImageProvider {
       return this.edit(params);
     }
 
-    const body: Record<string, unknown> = {
+    // The four fields every OpenAI-compat image endpoint accepts. Kept as a
+    // separate object so a strict relay can be retried with core-only.
+    const core: Record<string, unknown> = {
       model: model.modelId,
       prompt,
       n: Math.min(count, model.maxBatch || 1),
       size,
     };
+    const body: Record<string, unknown> = { ...core };
     // Negative prompt — send only when the model opts in via
     // capabilities.negativePrompt AND the user actually supplied one, so a
     // strict relay never sees an unexpected key. Flip the capability flag to
@@ -99,12 +116,18 @@ class OpenAICompatAdapter implements ImageProvider {
       if (known && body[k] === undefined) body[k] = v;
     }
 
-    const data = await this.postJson(
-      `${service.baseUrl.replace(/\/$/, "")}/images/generations`,
-      body,
-      apiKey,
-      service.name
-    );
+    const url = `${service.baseUrl.replace(/\/$/, "")}/images/generations`;
+    let data: { data?: Array<{ url?: string; b64_json?: string }> };
+    try {
+      data = await this.postJson(url, body, apiKey, service.name);
+    } catch (e) {
+      // Relay rejected an extra key. The model's declared schema over-promised
+      // what this upstream takes — drop the extras and retry once rather than
+      // failing the whole task.
+      const hasExtras = Object.keys(body).length > Object.keys(core).length;
+      if (!hasExtras || !isUnknownFieldError(e)) throw e;
+      data = await this.postJson(url, core, apiKey, service.name);
+    }
     return this.toResult(data, params);
   }
 

@@ -119,6 +119,11 @@ function pushHistory(task: GenerateTask) {
     negativePrompt: task.request.negativePrompt,
     modelName: task.model?.displayName ?? "Unknown",
     serviceName: task.service?.name ?? "Unknown",
+    // Ids too — name matching breaks the moment a model is renamed, and
+    // "reuse these params" needs the exact ids to refill the form.
+    serviceId: task.request.serviceId,
+    modelId: task.request.modelId,
+    seed: task.request.seed,
     aspectRatio: task.request.aspectRatio,
     size: task.request.size,
     count: task.request.count,

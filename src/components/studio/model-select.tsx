@@ -4,16 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Star, Clock, Coins, Check } from "lucide-react";
 import { useStudio } from "@/lib/store";
+import { fetchModels } from "@/lib/use-models";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import type { AiModel } from "@/lib/types";
-
-async function fetchModels(serviceId: string) {
-  const r = await fetch(`/api/models?serviceId=${serviceId}`);
-  return (await r.json()).models as AiModel[];
-}
 
 export function ModelSelect() {
   const serviceId = useStudio((s) => s.serviceId);
@@ -44,6 +40,12 @@ export function ModelSelect() {
     if (!models) return;
     const m = models.find((x) => x.id === modelId);
     if (!m) return;
+    // A preset / history recipe just filled the form with real values for this
+    // model — honoring the reset below would throw them away.
+    if (useStudio.getState().pendingRecipeFor === modelId) {
+      set("pendingRecipeFor", null);
+      return;
+    }
     const defaults: Record<string, number | string | boolean> = {};
     m.parameters.forEach((p) => {
       if (p.default !== undefined) defaults[p.key] = p.default;
