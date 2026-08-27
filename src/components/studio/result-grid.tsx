@@ -7,23 +7,26 @@ import {
   Maximize2,
   Star,
   Copy,
-  RefreshCw,
   Trash2,
 } from "lucide-react";
 import type { GeneratedImage, GenerateTask } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { ImageViewer } from "./image-viewer";
+import { BranchModifyPanel, BranchAction } from "./branch-modify";
 
 /**
  * 结果网格 — 工作台展示组件。
  *
  * 把任务生成的图片按 1 张单列 / 多张双列网格渲染，hover 时浮现
- * 下载、放大、收藏、复制 Prompt、重新生成、删除六个操作按钮，
+ * 下载、放大、收藏、复制 Prompt、继续修改、删除六个操作按钮，
  * 点击图片可进入全屏查看器（ImageViewer）。收藏状态仅本地记忆。
+ *
+ * 每张图的「继续修改」按钮会弹出 BranchModifyPanel：在该图基础上改 prompt /
+ * 取变体 / 图生图，产生一个带版本树链路的子任务。这是「无限画布」功能的一期入口。
  *
  * 交互对象：
  *   - useStudio store（无直接依赖，纯展示）
- *   - 子组件 ImageViewer
+ *   - 子组件 ImageViewer / BranchModifyPanel / BranchAction
  */
 
 const HOVER_ACTIONS = [
@@ -31,11 +34,16 @@ const HOVER_ACTIONS = [
   { icon: Maximize2, label: "放大" },
   { icon: Star, label: "收藏" },
   { icon: Copy, label: "复制 Prompt" },
-  { icon: RefreshCw, label: "重新生成" },
-  { icon: Trash2, label: "删除" },
 ] as const;
 
-export function ResultGrid({ task }: { task: GenerateTask }) {
+export function ResultGrid({
+  task,
+  onBranch,
+}: {
+  task: GenerateTask;
+  /** 点击「继续修改」时的回调，由父页面决定如何处理（弹面板 / 跳转）。 */
+  onBranch?: (task: GenerateTask, image: GeneratedImage) => void;
+}) {
   const [viewerIdx, setViewerIdx] = useState<number | null>(null);
   const [favSet, setFavSet] = useState<Set<string>>(new Set());
 
@@ -136,7 +144,13 @@ export function ResultGrid({ task }: { task: GenerateTask }) {
                   <HoverAction icon={Copy} label="复制" onClick={copyPrompt} />
                 </div>
                 <div className="flex gap-1">
-                  <HoverAction icon={RefreshCw} label="重新生成" />
+                  {onBranch && (
+                    <BranchAction
+                      task={task}
+                      image={img}
+                      onBranch={onBranch}
+                    />
+                  )}
                   <HoverAction icon={Trash2} label="删除" danger />
                 </div>
               </div>

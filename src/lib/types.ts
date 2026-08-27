@@ -99,6 +99,31 @@ export interface GenerateRequest {
   referenceImage?: string;
 }
 
+/**
+ * 分支请求 —— 在某个已生成图片的基础上「继续修改」。
+ *
+ * 与 GenerateRequest 的区别：它不重新描述整套参数，而是继承父任务的
+ * model/service/params，只额外指定「改哪张图、怎么改」。服务端会把父图
+ * 转成 base64 data URL 当 referenceImage，再调 enqueueTask。
+ */
+export interface BranchRequest {
+  /** 父任务 id。 */
+  parentTaskId: string;
+  /** 作为种子的父图 id（父任务 images[] 中的某一项）。 */
+  parentImageId: string;
+  /** 修改模式。 */
+  editMode: BranchMode;
+  /** 修改指令（增量）。reprompt 模式下与父 prompt 拼接后当全量 prompt。 */
+  promptDelta?: string;
+  /** 覆盖参数：只允许覆盖模型无关的生成参数（count/aspectRatio/size/seed/parameters）。 */
+  overrides?: Partial<
+    Pick<
+      GenerateRequest,
+      "count" | "aspectRatio" | "size" | "seed" | "parameters"
+    >
+  >;
+}
+
 /** 保存的生成配方——完整的参数集，一键即可复用。 */
 export interface Preset {
   id: string;
@@ -148,7 +173,23 @@ export interface GenerateTask {
   completedAt?: number;
   durationMs?: number;
   favorite?: boolean;
+  // ── 版本树链路（「继续修改」功能） ──
+  /** 父任务 id。根任务为 undefined。 */
+  parentTaskId?: string;
+  /** 作为种子的那张父图 id。多图任务里可以指定改的是哪一张。 */
+  parentImageId?: string;
+  /** 同一父图的所有兄弟分支共用的 id，画布布局时用来横向铺开。 */
+  branchId?: string;
+  /** 这条分支 ultimately 来自哪张根图。根任务为 undefined，子任务指向祖父的 rootImageId 或自己的父图。 */
+  rootImageId?: string;
+  /** 本次修改的模式：改 prompt / 变体 / 图生图。 */
+  editMode?: BranchMode;
+  /** 用户写的修改指令（增量），不是全量 prompt。仅 reprompt 模式有意义。 */
+  modificationPrompt?: string;
 }
+
+/** 「继续修改」的三种模式。 */
+export type BranchMode = "reprompt" | "variant" | "edit";
 
 export interface HistoryItem {
   id: string;
@@ -171,6 +212,10 @@ export interface HistoryItem {
   createdAt: number;
   favorite?: boolean;
   parameters: Record<string, number | string | boolean>;
+  /** 版本树链路：这条历史记录是否由某次「继续修改」产生。 */
+  parentTaskId?: string;
+  /** 这条分支 ultimately 来自哪张根图。 */
+  rootImageId?: string;
 }
 
 /** 每个第三方适配器都需实现的接口。接入新厂商只需新增一个适配器，前端无需改动。 */

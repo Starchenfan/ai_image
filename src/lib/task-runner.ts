@@ -14,8 +14,27 @@ function assert(v: unknown, msg: string): asserts v {
   if (!v) throw new Error(msg);
 }
 
+/**
+ * 版本树链路 —— 「继续修改」功能在任务上的投影。
+ *
+ * 分支任务由 /api/tasks/[id]/branch 创建，服务端把父任务的 model/service/参数
+ * 继承过来，再叠加 overrides。这里只负责把这些链路字段写进任务对象，
+ * 供画布视图（二期）和历史记录还原整棵树。
+ */
+interface TaskLineage {
+  parentTaskId?: string;
+  parentImageId?: string;
+  branchId?: string;
+  rootImageId?: string;
+  editMode?: string;
+  modificationPrompt?: string;
+}
+
 /** 创建任务并启动后台异步处理，返回该任务。 */
-export function enqueueTask(params: GenerateParams): GenerateTask {
+export function enqueueTask(
+  params: GenerateParams,
+  lineage?: TaskLineage
+): GenerateTask {
   const { model, service, count } = params;
   assert(model, "model missing");
   assert(service, "service missing");
@@ -41,6 +60,13 @@ export function enqueueTask(params: GenerateParams): GenerateTask {
     images: [],
     costCredits: model.priceCredits * count,
     createdAt: Date.now(),
+    // 版本树链路 —— 根任务不传，字段保持 undefined
+    parentTaskId: lineage?.parentTaskId,
+    parentImageId: lineage?.parentImageId,
+    branchId: lineage?.branchId,
+    rootImageId: lineage?.rootImageId,
+    editMode: lineage?.editMode as GenerateTask["editMode"],
+    modificationPrompt: lineage?.modificationPrompt,
   };
 
   db.tasks.set(task.id, task);
@@ -133,6 +159,9 @@ function pushHistory(task: GenerateTask) {
     durationMs: task.durationMs ?? 0,
     createdAt: task.completedAt ?? Date.now(),
     parameters: task.request.parameters,
+    // 版本树链路 —— 让历史记录也能还原整棵分支树
+    parentTaskId: task.parentTaskId,
+    rootImageId: task.rootImageId,
   });
   if (db.history.length > 200) db.history.length = 200;
 }

@@ -71,8 +71,13 @@ async function ensureSchema() {
         duration_ms BIGINT NOT NULL DEFAULT 0,
         favorite TINYINT(1) NOT NULL DEFAULT 0,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        // 版本树链路 —— 「继续修改」产生分支任务时，把父任务 id 与根图 id
+        // 写进每一张图，重启后 /history 仍能还原整棵分支树。
+        parent_task_id VARCHAR(64) NULL,
+        root_image_id VARCHAR(64) NULL,
         INDEX idx_generated_images_task_id (task_id),
-        INDEX idx_generated_images_created_at (created_at)
+        INDEX idx_generated_images_created_at (created_at),
+        INDEX idx_generated_images_parent_task_id (parent_task_id)
       )`);
 
       const [columns] = await pool.query<RowDataPacket[]>("SHOW COLUMNS FROM generated_images");
@@ -92,6 +97,8 @@ async function ensureSchema() {
         cost_credits: "INT NOT NULL DEFAULT 0",
         duration_ms: "BIGINT NOT NULL DEFAULT 0",
         favorite: "TINYINT(1) NOT NULL DEFAULT 0",
+        parent_task_id: "VARCHAR(64) NULL",
+        root_image_id: "VARCHAR(64) NULL",
       };
 
       for (const [column, definition] of Object.entries(additions)) {
@@ -142,8 +149,10 @@ export async function persistGeneratedImages(
             id, task_id, file_path, mime_type, width, height, seed, image_data,
             prompt, negative_prompt, model_name, service_name, service_id,
             model_id, request_seed, aspect_ratio,
-            image_size, parameters, cost_credits, duration_ms, favorite, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            image_size, parameters, cost_credits, duration_ms, favorite, created_at,
+            // 版本树链路 —— 分支任务的父任务 id 与根图 id，重启后仍可还原分支树
+            parent_task_id, root_image_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             file_path = VALUES(file_path), mime_type = VALUES(mime_type),
             width = VALUES(width), height = VALUES(height), seed = VALUES(seed),
@@ -153,7 +162,8 @@ export async function persistGeneratedImages(
             model_id = VALUES(model_id), request_seed = VALUES(request_seed),
             aspect_ratio = VALUES(aspect_ratio),
             image_size = VALUES(image_size), parameters = VALUES(parameters),
-            cost_credits = VALUES(cost_credits), duration_ms = VALUES(duration_ms)`,
+            cost_credits = VALUES(cost_credits), duration_ms = VALUES(duration_ms),
+            parent_task_id = VALUES(parent_task_id), root_image_id = VALUES(root_image_id)`,
           [
             image.id,
             task.id,
@@ -177,6 +187,8 @@ export async function persistGeneratedImages(
             task.durationMs || 0,
             task.favorite ? 1 : 0,
             new Date(task.completedAt || Date.now()),
+            task.parentTaskId || null,
+            task.rootImageId || null,
           ]
         );
         return { ...image, url: `/api/images/${image.id}` };
@@ -211,6 +223,10 @@ type HistoryRow = RowDataPacket & {
   duration_ms: number | string;
   favorite: number;
   created_at: Date | string;
+  /** 版本树链路 —— 分支任务的父任务 id，根任务为 null。 */
+  parent_task_id: string | null;
+  /** 这条分支 ultimately 来自哪张根图对应的任务 id。 */
+  root_image_id: string | null;
 };
 
 function parseParameters(value: unknown): HistoryItem["parameters"] {
@@ -237,7 +253,8 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
       image_data IS NOT NULL AS has_image_data, prompt, negative_prompt,
       model_name, service_name, service_id, model_id, request_seed,
       aspect_ratio, image_size, parameters,
-      cost_credits, duration_ms, favorite, created_at
+      cost_credits, duration_ms, favorite, created_at,
+      parent_task_id, root_image_id
       FROM generated_images
       ORDER BY created_at DESC, task_id, id`);
 
@@ -262,6 +279,9 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
         createdAt: Number.isNaN(createdAt) ? Date.now() : createdAt,
         favorite: Boolean(row.favorite),
         parameters: parseParameters(row.parameters),
+        // 版本树链路 —— 从持久化层原样带回，重启后分支树不丢
+        parentTaskId: row.parent_task_id || undefined,
+        rootImageId: row.root_image_id || undefined,
       };
       item.images.push({
         id: row.id,

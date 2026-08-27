@@ -14,8 +14,9 @@ import { ReferenceImageUpload } from "@/components/studio/reference-image";
 import { GenerateButton } from "@/components/studio/generate-button";
 import { TaskStatus } from "@/components/studio/task-status";
 import { ResultGrid } from "@/components/studio/result-grid";
+import { BranchModifyPanel } from "@/components/studio/branch-modify";
 import { CompareBoard, type CompareEntry } from "@/components/studio/compare-board";
-import type { AiModel, GenerateTask } from "@/lib/types";
+import type { AiModel, GenerateTask, GeneratedImage } from "@/lib/types";
 
 // fetchModel — 按 modelId 拉取单个模型的完整定义（含参数 Schema）。
 // 之所以单独抽出来而不是复用 /api/models 列表接口，是因为工作台需要的是
@@ -51,6 +52,11 @@ export default function StudioPage() {
   const prompt = useStudio((s) => s.prompt);
   const [genError, setGenError] = useState<string | null>(null);
   const [compareEntries, setCompareEntries] = useState<CompareEntry[] | null>(null);
+  // 分支修改面板：用户在某张已生成图上点「继续修改」时，记录选中的父图。
+  const [branchTarget, setBranchTarget] = useState<{
+    task: GenerateTask;
+    image: GeneratedImage;
+  } | null>(null);
 
   // model：当前选中模型的完整定义。enabled 跟踪 modelId，切模型时自动重取；
   // 参数轨里的「动态参数」区块（AdvancedParams）依赖这个 data 才能渲染。
@@ -163,6 +169,29 @@ export default function StudioPage() {
     document.getElementById("service-section")?.scrollIntoView({ behavior: "smooth" });
   };
 
+  /**
+   * handleBranch — 在某张已生成图上点「继续修改」。
+   *
+   * 只负责记下选中的父图，弹出 BranchModifyPanel 让用户描述怎么改。
+   * 真正的提交由面板自己发请求，成功后回调 handleBranchStarted。
+   */
+  const handleBranch = (task: GenerateTask, image: GeneratedImage) => {
+    setBranchTarget({ task, image });
+  };
+
+  /**
+   * handleBranchStarted — 分支任务提交成功。
+   *
+   * 链路（parentTaskId / branchId / rootImageId）已由服务端写进新任务，
+   * 这里只需要把画布切到轮询态。父任务仍在 /history 里，
+   * 二期的画布视图会用它还原整棵分支树。
+   */
+  const handleBranchStarted = (taskId: string) => {
+    setBranchTarget(null);
+    set("results", null);
+    set("activeTaskId", taskId);
+  };
+
   return (
     <div className="grid grid-cols-1 gap-4 lg:h-[calc(100dvh-5.75rem)] lg:min-h-0 lg:grid-cols-[360px_minmax(0,1fr)]">
       {/* 左侧 — 参数轨。用「实心抬升卡片」而非 backdrop-filter 模糊来做视觉分割：
@@ -237,10 +266,18 @@ export default function StudioPage() {
                 </p>
               </div>
             </div>
-            <ResultGrid task={results} />
+            <ResultGrid task={results} onBranch={handleBranch} />
           </div>
         ) : (
           <EmptyState />
+        )}
+        {branchTarget && (
+          <BranchModifyPanel
+            task={branchTarget.task}
+            image={branchTarget.image}
+            onClose={() => setBranchTarget(null)}
+            onStarted={handleBranchStarted}
+          />
         )}
       </section>
     </div>
