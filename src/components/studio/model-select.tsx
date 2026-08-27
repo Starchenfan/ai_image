@@ -58,8 +58,8 @@ export function ModelSelect() {
     if (!models) return;
     const m = models.find((x) => x.id === modelId);
     if (!m) return;
-    // A preset / history recipe just filled the form with real values for this
-    // model — honoring the reset below would throw them away.
+    // 预设 / 历史配方刚刚给这个模型填了真实参数值——如果执行下方的重置，
+    // 这些值就会被丢掉，所以要先跳过。
     if (useStudio.getState().pendingRecipeFor === modelId) {
       set("pendingRecipeFor", null);
       return;

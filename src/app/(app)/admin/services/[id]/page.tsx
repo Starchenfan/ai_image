@@ -380,9 +380,19 @@ function ModelEditor({
       qc.invalidateQueries({ queryKey: ["admin-service"] }),
   });
 
+  /**
+   * updateField — 合并模型顶层字段到 draft。纯函数式状态更新：
+   * setDraft((d) => ({ ...d, ...patch }))，保证不可变性，React 才能做 bail-out。
+   * 所有 basic fields 输入框的 onChange 都经它。
+   */
   const updateField = (patch: Partial<AiModel>) =>
     setDraft((d) => ({ ...d, ...patch }));
 
+  /**
+   * updateParam — 合并某个参数项的字段到 draft.parameters[i]。
+   * map + 三元表达式保证除了目标项外其他参数引用不变，
+   * ParamEditor 里未改动的行不会重渲染。
+   */
   const updateParam = (i: number, patch: Partial<ModelParameterSchema>) =>
     setDraft((d) => ({
       ...d,
@@ -391,6 +401,12 @@ function ModelEditor({
       ),
     }));
 
+  /**
+   * addParam — 新增一个参数项，默认填一套可直接保存的值：
+   * key 用 param_{n+1} 保证唯一，type 首选 slider（最常见），
+   * min 0 / max 100 / step 1 / default 50（滑块默认语义），
+   * group 归入 basic（与高级参数区分）。建完通过 updateField 写进 draft。
+   */
   const addParam = () => {
     const newParam: ModelParameterSchema = {
       key: `param_${draft.parameters.length + 1}`,
@@ -405,6 +421,11 @@ function ModelEditor({
     updateField({ parameters: [...draft.parameters, newParam] });
   };
 
+  /**
+   * removeParam — 删除指定位置的参数项。filter 后新数组长度减一，
+   * draft 其他字段不动。没有 confirm：单个参数删错成本低，
+   * 用户可以立刻 addParam 补回来。
+   */
   const removeParam = (i: number) =>
     setDraft((d) => ({
       ...d,
@@ -413,7 +434,15 @@ function ModelEditor({
 
   return (
     <div className="space-y-4 p-4">
-      {/* basic fields */}
+      {/* basic fields — 模型的基础属性。分两组 grid：
+          第一组是「这个模型是什么」（显示名/modelId/描述/价格/批量/耗时），
+          第二组是「这个模型支持什么」（比例/尺寸/标签）。
+          之所以拆成两个 grid 而不是一个：字段语义不同，分开后视觉上更好扫读。
+          modelId 用 font-mono 且 label 明确写了「发送给 provider」——
+          它是最终发给上游 API 的字符串，和用户看到的显示名是两回事，必须区分。
+          价格/批量/耗时都是 number 输入，Number() 包一层避免空串污染 state。
+          比例/尺寸/标签用「逗号分隔」的字符串输入，
+          输入即转数组：join(", ") 回显、split(",") 入库，比数组 state 更适合自由文本编辑。 */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="显示名称">
           <Input
@@ -512,7 +541,11 @@ function ModelEditor({
         />
       </Field>
 
-      {/* enabled toggle */}
+      {/* enabled toggle — 是否在工作台里可见。
+          单独做成一条带边框的行，而不是并进上面的 grid：
+          它是「开关」不是「填空」，需要更明显的视觉权重。
+          关掉后模型不会出现在工作台的可选列表里，但配置保留，
+          相当于「下架」而非删除——随时可以重新打开。 */}
       <div className="flex items-center justify-between rounded-md border border-line bg-paper-3/30 px-3 py-2">
         <span className="text-xs text-ink-2">启用模型</span>
         <Switch
@@ -521,7 +554,19 @@ function ModelEditor({
         />
       </div>
 
-      {/* PARAMETER SCHEMA EDITOR */}
+      {/* PARAMETER SCHEMA EDITOR — 模型参数的定义区，也是整个详情页最重要的区块。
+          它决定了工作台渲染出哪些控件（滑块/下拉/数字/文本/开关），
+          以及每个控件的默认值、范围、选项。
+          设计决策：提供「表单」与「JSON」两种视图，右上角的 Eye/EyeOff 按钮切换。
+          - 表单视图：逐字段编辑，适合第一次配置，字段含义直观。
+          - JSON 视图：只读，展示 draft.parameters 序列化后的原文。
+            只读而非可编辑的理由：手写 JSON 容易写出后端校验不过的非法组合
+            （比如 slider 却没给 min），而且表单已经能表达全部字段，
+            JSON 只是「我现在配置长什么样」的审查视图。
+          参数数组为空时的提示文案指向前端默认行为，避免用户以为漏配。
+          每个参数项用 ParamEditor 子组件渲染，key 用数组下标 i 而不是 param.key：
+          参数没有稳定 id，下标是唯一稳定标识；即使用户改了 param.key，
+          组件实例也不会错位。 */}
       <div className="space-y-2.5 rounded-md border border-line bg-paper-3/20 p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -575,7 +620,12 @@ function ModelEditor({
         )}
       </div>
 
-      {/* actions */}
+      {/* actions — 底部操作栏。border-t + pt-3 把它和上面的编辑区做视觉分割，
+          让「保存/删除」这类提交动作固定在编辑器底部，符合用户从上到下
+          「填完 → 提交」的阅读顺序。
+          左侧删除（danger）、右侧保存（主按钮）：删除是破坏性操作，
+          放在远离主按钮的一侧，避免误触；保存按钮带 saving 状态，
+          禁用期间文案变「保存中…」，防止重复提交。 */}
       <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
         <Button
           variant="danger"
@@ -605,6 +655,21 @@ function ParamEditor({
   onChange: (patch: Partial<ModelParameterSchema>) => void;
   onRemove: () => void;
 }) {
+  /**
+   * ParamEditor — 单个参数项的编辑卡片。ModelEditor 的参数列表里一行一个。
+   *
+   * 它不直接碰 ModelEditor 的 state，而是通过 onChange/onRemove 回调向上提交：
+   * 这样 ModelEditor 可以用数组下标做 key 来定位要改哪一项，
+   * 即使用户在 Key 输入框里改了 param.key，组件实例也不会错位。
+   *
+   * 布局：三行。第一行 Key/Label/Type/Group（标识与分类），
+   * 第二行 Min/Max/Step/Default（数值范围，slider/number 类型用），
+   * 第三行 Options + 高级开关 + 删除（额外配置与收尾）。
+   * 之所以把 Options 和删除放在第三行：它们不是每个参数都用得上
+   * （Options 只对 select 类型有效），单独一行避免主网格拥挤。
+   * Min/Max/Step 允许为空：空表示「不限制」，转成 undefined 走后端默认，
+   * 比强制填 0 更符合语义（比如 text 类型根本不需要 min/max）。
+   */
   return (
     <div className="space-y-2 rounded-md border border-line bg-paper-2/50 p-2.5">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

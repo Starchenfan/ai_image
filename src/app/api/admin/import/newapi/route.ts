@@ -78,9 +78,8 @@ export async function GET(req: Request) {
       if (!res.ok) continue;
       models = data.data ?? [];
 
-      // Heuristic: relays often prefix/suffix image models. We can't know for
-      // sure which are image-capable without probing, so we return everything
-      // with a best-effort "likely image" flag for the common markers.
+      // 启发式：中转站常常给图像模型加前缀/后缀。不经探测无法确定哪些真的能出图，
+      // 因此返回全部模型，并对常见标记打一个「可能为图像模型」的粗略标记。
       const IMAGE_MARKERS = [
         "image", "dall", "flux", "sd", "stable", "midjourney", "mj",
         "kolors", "wanx", "cogview", "qwen-image", "sensenova", "u1",
