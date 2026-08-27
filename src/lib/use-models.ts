@@ -20,9 +20,8 @@ export function useServiceModels() {
   });
 }
 
-/** The model currently selected in the generate form, or undefined while the
- *  list is still loading. Read `.capabilities` off this to gate UI that maps to
- *  a provider field the model may not accept. */
+/** 当前生成表单中选中的模型，列表加载中时为 undefined。
+ *  读取 .capabilities 可以判断某些 provider 字段模型是否接受（如 negativePrompt）。 */
 export function useSelectedModel(): AiModel | undefined {
   const modelId = useStudio((s) => s.modelId);
   const { data: models } = useServiceModels();

@@ -52,6 +52,8 @@ const ADAPTER_TYPES: AdapterType[] = [
   "proxy",
 ];
 
+// FIELD_TYPES — 参数 Schema 的 type 字段可选值。顺序影响管理后台里下拉框的排列，
+// 与后端 ModelParameterSchema 的 type 联类型一一对应，不能随意增删。
 const FIELD_TYPES: ModelParameterSchema["type"][] = [
   "number",
   "select",
@@ -60,16 +62,38 @@ const FIELD_TYPES: ModelParameterSchema["type"][] = [
   "boolean",
 ];
 
+// fetchService — 按 id 拉取单个服务的完整定义 + 其下属模型列表。
+// 一次请求同时拿到 service 与 models，避免工作台 和管理后台各自再调一次 /api/models。
 async function fetchService(id: string) {
   const r = await fetch(`/api/admin/services/${id}`);
   return (await r.json()) as { service: AiService; models: AiModel[] };
 }
 
+// fetchModels — 按 serviceId 拉模型列表。
+// 与 fetchService 冗余是因为某些场景（如 ImportNewApi 导入后刷新）只需要模型，
+// 单独一个接口比耦合在一起更灵活。queryKey 里不含 serviceId 是有意的：
+// 这里只在组件内联用，不参与跨组件缓存共享。
 async function fetchModels(serviceId: string) {
   const r = await fetch(`/api/admin/models?serviceId=${serviceId}`);
   return (await r.json()).models as AiModel[];
 }
 
+/**
+ * ServiceDetailPage — 单个 AI 图像服务的详情页（/admin/services/[id]）。
+ *
+ * 它是 /admin 列表页的「下钻」面：列表页回答「有哪些服务」，这里回答
+ * 「这个服务下面有哪些模型、每个模型怎么配置」。
+ *
+ * 和其他页面的关系：它是纯管理后台页面，不参与生成流程；工作台（/）通过
+* 服务列表间接消费这里配置的模型。用户在工作台选的每个模型，其参数 Schema
+ * 都是在这个页面的 ModelEditor 里定义的——它是「生成器参数」的源头。
+ *
+ * 布局：面包屑 → 服务标题行（返回按钮 + 名称 + Base URL + 删除服务）→
+ * 两个 Tab：「模型」Tab（模型列表，每条可展开编辑）与「服务配置」Tab
+ * （服务级字段：适配器、Base URL、状态、Key 等）。
+ * 之所以用 Tab 而不是上下分区：模型编辑和配置编辑是两个独立的关注面，
+ * 同时展示会让页面过长，且模型编辑是高频操作、需要更多纵向空间。
+ */
 export default function ServiceDetailPage({
   params,
 }: {
@@ -86,6 +110,14 @@ export default function ServiceDetailPage({
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
 
+  /**
+   * delService — 删除当前服务的 mutation。
+   *
+   * 角色：它是详情页唯一的「破坏性写操作」。删除会同时移除该服务下的所有模型，
+   * 所以按钮上包了一层 confirm 用户确认，而不是直接调用。
+   * onSuccess 里 router.push("/admin")：服务没了，继续停在详情页没有意义，
+   * 直接退回列表页。不做乐观更新：删除不可逆，让后端和缓存同步说了算。
+   */
   const delService = useMutation({
     mutationFn: async () => {
       await fetch(`/api/admin/services/${id}`, { method: "DELETE" });
@@ -98,7 +130,9 @@ export default function ServiceDetailPage({
 
   return (
     <div className="space-y-5">
-      {/* breadcrumb */}
+      {/* breadcrumb — 面包屑导航。只有一层（服务管理 → 当前服务），
+          因为详情页在整个管理后台里的深度就两层，不需要多级。
+          当前项用 ink-2 加深，可点击项 hover 变黑，符合顶栏/列表页的链接语言。 */}
       <div className="flex items-center gap-2 text-xs text-ink-3">
         <Link href="/admin" className="transition-colors hover:text-ink">
           服务管理
@@ -107,6 +141,14 @@ export default function ServiceDetailPage({
         <span className="text-ink-2">{service?.name ?? "…"}</span>
       </div>
 
+      {/* header — 服务标题行。
+          左侧：返回按钮（ghost 图标，回到 /admin 列表）+ 服务名（H1，font-display）+ Base URL（monospace 小字，ink-3 灰）。
+          右侧：删除服务按钮（danger 样式）。
+          左右分离的理由：返回是高频轻操作、删除是低频破坏性操作，放在对侧避免
+          用户在左半区「导航」时误触右半区的危险动作。
+          标题用 service?.name ?? "加载中…" 兜底，Base URL 同理——数据未到时显示占位，
+          不留空白 H1。删除按钮上的 confirm 是唯一一道人工闸门：删服务会连带删掉
+          其下所有模型，不可逆，所以不靠后端 4xx 兜底，而是先问用户。 */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <Link href="/admin">
@@ -136,6 +178,11 @@ export default function ServiceDetailPage({
         </Button>
       </div>
 
+      {/* Tabs — 两个标签页：「模型」与「服务配置」。
+          之所以分 Tab 而不是上下分区：模型编辑与配置编辑是两个独立的关注面，
+          同时展示会让页面过长；模型编辑是高频操作且需要更多纵向空间（参数表），
+          所以放在默认激活的 Tab。
+          模型 Tab 的计数直接取 models.length，用户能一眼知道这个服务下有多少模型。 */}
       <Tabs defaultValue="models">
         <TabsList>
           <TabsTrigger value="models">
@@ -148,7 +195,13 @@ export default function ServiceDetailPage({
           </TabsTrigger>
         </TabsList>
 
-        {/* MODELS TAB */}
+        {/* MODELS TAB — 模型列表。
+            上方工具栏：提示文案 + 「添加模型」按钮（打开 AddModelDialog）。
+            列表用 grid gap-2.5 竖向排列，每个 ModelRow 默认折叠，
+            点击展开后内部是 ModelEditor（参数 Schema 编辑器）。
+            selectedModel 是一个「单开」状态：同一时间只允许一个模型展开，
+            切换时 setSelectedModel 把旧的置 null，符合手风琴交互。
+            空列表时显示虚线占位框，文案指向「添加模型」按钮，引导用户第一步动作。 */}
         <TabsContent value="models" className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-xs text-ink-3">
@@ -186,7 +239,10 @@ export default function ServiceDetailPage({
           />
         </TabsContent>
 
-        {/* CONFIG TAB */}
+        {/* CONFIG TAB — 服务级配置。
+            service 从 useQuery 的 data 里解构，数据未到时这里不渲染
+            （{service && <ServiceConfig ... />}），避免把 undefined 传进去。
+            ServiceConfig 内部自己维护一份 draft 副本，所以切换 Tab 不会丢未保存的改动。 */}
         <TabsContent value="config">
           {service && <ServiceConfig service={service} />}
         </TabsContent>
@@ -206,6 +262,22 @@ function ModelRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  /**
+   * ModelRow — 模型列表里的单行。既是列表项也是折叠容器。
+   *
+   * 角色：它把一行信息展示 + 展开编辑两件事合在一个按钮上，
+   * 点击按钮切换 expanded，展开区才渲染 ModelEditor。之所以做成 button 而不是
+   * div + 独立「编辑」按钮：折叠/展开本身就是对这行的操作，按钮内包含全部信息，
+   * 减少视觉噪音。
+   *
+   * 左侧 GripVertical 图标是「可拖拽」的暗示（虽然目前排序暂未实现），
+   * 保留是为了给未来的拖拽排序留视觉预期——这是一个 intentionally-ahead 的信号。
+   * 中间信息区：displayName（主标题）+ modelId（monospace badge，发送给 provider 的实际 ID，
+   * 和显示名分开显示，因为两者经常不同）+ description（一行描述，超出省略）。
+   * 未启用的模型额外加一个 danger badge「已禁用」，让用户知道它不会出现在工作台。
+   * 右侧 meta strip（仅 sm 以上显示）：参数数量 / 比例数量 / 价格，
+   * 全部用 monospace 对齐，一眼可比价。sm 以下隐藏是为了在窄屏上保住中间描述的显示。
+   */
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-paper-2/40">
       <button
@@ -252,11 +324,32 @@ function ModelEditor({
   model: AiModel;
   serviceId: string;
 }) {
+  /**
+   * ModelEditor — 单个模型的完整编辑器（ModelRow 展开后的内容）。
+   *
+   * 它是「生成器参数」的源头：工作台里用户能调的每一个滑块/输入框，
+   * 其 key、label、type、min/max/step、默认值都是在这里定义的。
+   * 输出（draft）先存 DB，工作台再从 DB 读——Schema 在这里定义一次，两端共用。
+   *
+   * 状态设计：draft 是一份可变副本（{ ...model } 深拷贝一级），
+   * 所有输入都更新 draft 而不写回 model 原始对象；只有点「保存模型」才发 PATCH。
+   * 用户可以放心改、折叠走人也不会污染缓存。
+   * queryKey 用 ["admin-service"] 而不是 ["admin-model", model.id]：
+   * fetchService 一次返回 service + models，整个详情页数据都挂在这一个键下，
+   * 保存后 invalidate 这个键即可让模型行、列表、配置 Tab 一起刷新。
+   */
   const qc = useQueryClient();
   const [draft, setDraft] = useState<AiModel>({ ...model });
   const [showJson, setShowJson] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  /**
+   * patch — 保存模型。PATCH 到 /api/admin/models/{id}，body 就是 draft 全量。
+   * 成功后 invalidate ["admin-service"] 与 ["models"] 两个键：
+   * 前者刷新详情页数据（模型行立即反映新值），后者刷新工作台侧的模型列表缓存。
+   * try/finally 保证 saving 在网络异常时也能置 false，避免按钮永久禁用。
+   * 服务端是 PATCH 部分更新，所以整份 draft 都发过去没问题。
+   */
   const patch = async () => {
     setSaving(true);
     try {
@@ -272,6 +365,13 @@ function ModelEditor({
     }
   };
 
+  /**
+   * delModel — 删除当前模型的 mutation。
+   * 用 useMutation 包装而非内联 async：按钮上只需 .mutate()，
+   * 错误处理与 settled 回调统一由 mutation 管理。
+   * onSettled（无论成功失败都跑）里 invalidate ["admin-service"]——删完列表少一行。
+   * 按钮本身包了 confirm：删模型不可逆，删掉后工作台里对应模型也会消失。
+   */
   const delModel = useMutation({
     mutationFn: async () => {
       await fetch(`/api/admin/models/${model.id}`, { method: "DELETE" });

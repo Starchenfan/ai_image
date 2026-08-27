@@ -86,12 +86,14 @@ export default function StatsPage() {
         </div>
       </header>
 
-      三态渲染（由上至下判定）：
+      {/*
+       三态渲染（由上至下判定）：
           1. !s              → 数据还没到，渲染 StatsSkeleton，避免数字「从 0 跳到 123」的闪烁。
           2. s.totalTasks === 0 → 没有任何生成记录，渲染空状态并引导去创作。
           3. 否则              → 四张统计卡 + 图表 + 明细表。
           注意 1 和 2 必须分开：不能用 totalTasks===0 同时代表「未加载」和「真为空」。
-          之所以用 !s 而不是 s.totalTasks===0 做第一层判断，是为了把「未加载」与「真为空」区分开。 */}
+          之所以用 !s 而不是 s.totalTasks===0 做第一层判断，是为了把「未加载」与「真为空」区分开。
+      */}
       {!s ? (
         <StatsSkeleton />
       ) : s.totalTasks === 0 ? (
