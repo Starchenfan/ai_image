@@ -728,6 +728,12 @@ function ParamEditor({
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {/* Min / Max / Step — 数值范围，主要给 slider 与 number 类型用。
+            三个输入都用 type="number"，值为空时转 undefined（表示「无限制」），
+            而不是写 0——0 对 min 是合法值（下限就是 0），
+            对「无限制」则是错误语义，所以必须区分空与 0。
+            Default 字段类型是 string（可为任意值），所以不用 type="number"，
+            避免用户想填字符串默认值时被数字输入框拦截。 */}
         <Field label="Min" tiny>
           <Input
             type="number"
@@ -773,6 +779,12 @@ function ParamEditor({
         </Field>
       </div>
 
+      {/* 底部行：Options 输入框 + 「高级」开关 + 删除按钮。
+          Options 只对 select 类型有效（下拉框候选值），用逗号分隔字符串输入，
+          和 ModelEditor 里的比例/尺寸/标签同一套路，便于自由编辑。
+          「高级」开关把参数标记为 advanced：工作台渲染时可以折叠进「高级参数」分组，
+          让新手界面保持简洁。删除按钮用 ghost + danger 图标，不写文字，
+          因为每行都有、纵向紧凑——鼠标悬停Trash 即可确认含义。 */}
       <div className="flex items-end gap-2">
         <div className="flex-1">
           <Field label="Options (逗号分隔, select 类型用)" tiny>
@@ -806,14 +818,40 @@ function ParamEditor({
 }
 
 function ServiceConfig({ service }: { service: AiService }) {
+  /**
+   * ServiceConfig — 「服务配置」Tab 的内容，编辑服务级字段。
+   *
+   * 和 ModelEditor 的区别：ModelEditor 管模型（参数 Schema 的源头），
+   * 这里管服务（适配器类型、Base URL、状态、Key、是否推荐）。
+   * 服务是模型的容器——改 Base URL 会影响其下所有模型的请求地址，
+   * 所以这个 Tab 默认不激活（Tabs defaultValue="models"），
+   * 用户主动切过去才会改，避免误改影响面大。
+   *
+   * apiKey 另用独立 state 而不是 draft 的一部分：
+   * 密钥是敏感字段，编辑完就清空（setApiKey("")），不在前端多留一份；
+   * placeholder 显示 service.apiKeyMasked（后端脱敏后的值，如 sk-****），
+   * 让用户知道当前绑了 key、且知道要不要覆盖。
+   * 只有输入了新值才随 body 上报（if (apiKey) body.apiKey = apiKey），
+   * 不输入就走后端原值， PATCH 部分更新不会覆盖。
+   */
   const qc = useQueryClient();
   const [draft, setDraft] = useState<AiService>({ ...service });
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
 
+  /**
+   * update — 合并服务字段到 draft，和 ModelEditor.updateField 同一套写法。
+   */
   const update = (patch: Partial<AiService>) =>
     setDraft((d) => ({ ...d, ...patch }));
 
+  /**
+   * save — 保存服务配置。PATCH /api/admin/services/{id}，body 合并 draft + 新 apiKey（如有）。
+   * 成功后 invalidate ["admin-service"]：详情页的标题、Base URL、服务状态 Badge 一起刷新。
+   * 清空 apiKey 是为了：密钥一旦提交就留在后端，前端不再持有，
+   * 下次进来仍然显示 masked 占位，符合安全习惯。
+   * try/finally 保证 saving 复位。
+   */
   const save = async () => {
     setSaving(true);
     try {
@@ -906,6 +944,12 @@ function ServiceConfig({ service }: { service: AiService }) {
           />
         </Field>
       </div>
+      {/* API Key (覆盖) — 密钥输入框。
+          type="password" 让输入内容掩码显示；placeholder 用 service.apiKeyMasked
+          （后端脱敏值，如 sk-****）占位，用户一眼知道当前已绑定 key。
+          value 单独存 apiKey state，不放进 draft：避免密钥长期在前端内存里留存。
+          输入为空时 save() 不上报 apiKey，PATCH 部分更新不会动后端原值。
+          下方 p 标签始终显示当前脱敏值，作为「现在绑了什么」的只读回显。 */}
       <Field label="API Key (覆盖)">
         <Input
           type="password"
@@ -924,6 +968,9 @@ function ServiceConfig({ service }: { service: AiService }) {
           onCheckedChange={(v) => update({ recommended: v })}
         />
       </div>
+      {/* 底部操作栏：border-t + pt-3 与上面表单分区，右对齐一个保存按钮。
+          左侧不放取消：draft 是本地副本，关掉 Tab 或跳走都不会污染缓存，
+          不需要显式取消按钮，节省纵向空间。 */}
       <div className="flex justify-end gap-2 border-t border-line pt-3">
         <Button onClick={save} disabled={saving} size="sm">
           <Save className="h-3.5 w-3.5" />
@@ -943,6 +990,17 @@ function AddModelDialog({
   onOpenChange: (v: boolean) => void;
   serviceId: string;
 }) {
+  /**
+   * AddModelDialog — 「添加模型」弹窗，由 MODELS TAB 工具栏的 + 按钮打开。
+   *
+   * 它只负责创建模型的「壳」——显示名、modelId、描述、价格、批量；
+   * 参数 Schema、比例、尺寸等留到创建后的 ModelEditor 里配（底部小字也是这个提示）。
+   * 为什么拆两步：参数 Schema 是模型的核心配置，一旦创建就该有，
+   * 在弹窗里一次性塞太多字段会很难看；先建壳、再进编辑器，流程更清晰。
+   *
+   * serviceId 由父组件传入而不是从 URL 取：详情页的 id 是服务 id，
+   * 这里语义上是「往哪个服务里加」，显式传参比从路径字符串再解析一次更直白。
+   */
   const qc = useQueryClient();
   const [form, setForm] = useState({
     displayName: "",
@@ -953,6 +1011,13 @@ function AddModelDialog({
   });
   const [saving, setSaving] = useState(false);
 
+  /**
+   * submit — POST /api/admin/models，body 把 form 展开并附上 serviceId。
+   * 成功后：invalidate ["admin-service"]（模型列表立即多一行）、
+   * 关闭弹窗、重置 form 到初始值（避免下次打开残留上一次的输入）。
+   * 重置放在 onOpenChange(false) 之后：先关窗再清表单，用户看不到清空动画。
+   * try/finally 保证 saving 复位，避免网络异常时按钮永久禁用。
+   */
   const submit = async () => {
     setSaving(true);
     try {
@@ -1018,6 +1083,8 @@ function AddModelDialog({
               />
             </Field>
           </div>
+          {/* 底部提示：明说创建后还要做什么，管理用户对后续步骤的预期，
+              避免他以为建完就能直接在工作台调参。 */}
           <p className="text-[10px] text-ink-3">
             创建后可在模型编辑器中配置参数 Schema、比例、尺寸等。
           </p>
@@ -1030,6 +1097,9 @@ function AddModelDialog({
           >
             取消
           </Button>
+          {/* 创建按钮的唯一必填校验是 displayName：
+              modelId 后端可以自己生成/推导，描述可空，价格/批量有默认值。
+              用 disabled 而不是 submit 后再 reject：用户根本点不动，体验更干净。 */}
           <Button onClick={submit} disabled={saving || !form.displayName}>
             {saving ? "创建中…" : "创建"}
           </Button>
@@ -1048,6 +1118,14 @@ function Field({
   children: React.ReactNode;
   tiny?: boolean;
 }) {
+  /**
+   * Field — 表单字段的 label + 输入框容器。纯展示组件，无状态。
+   *
+   * 把「Label + 间距」抽出来避免每个输入框重复写 className，
+   * 同时统一 label 的颜色（text-ink-3 灰）与字号。
+   * tiny 参数只在参数编辑器这种紧凑场景用（10px），否则 12px，
+   * 一处控制全表字号，比散落在各处写 text-[11px] 好维护。
+   */
   return (
     <div className="space-y-1">
       <Label
