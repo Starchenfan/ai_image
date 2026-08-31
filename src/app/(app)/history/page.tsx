@@ -13,14 +13,17 @@ import {
   ImageIcon,
   SlidersHorizontal,
   ClipboardCopy,
+  ImagePlus,
 } from "lucide-react";
-import type { HistoryItem } from "@/lib/types";
+import type { HistoryItem, GenerateTask, GeneratedImage } from "@/lib/types";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStudio } from "@/lib/store";
+import { TreeCanvas } from "@/components/studio/tree-canvas";
+import { Portal } from "@/components/ui/portal";
 
 type Filter = "all" | "today" | "favorite";
 
@@ -74,6 +77,43 @@ function downloadName(h: HistoryItem, url: string) {
 }
 
 /**
+ * toTask — 把历史记录还原成 TreeCanvas 需要的 GenerateTask 形态。
+ *
+ * 为什么需要它：TreeCanvas 的分支提交走 /api/tasks/[id]/branch，
+ * 后端 resolveParentTask 已经支持从 MySQL 还原历史记录当父任务；
+ * 但画布自身需要 task.request.prompt / task.model / task.service
+ * 来渲染节点标签，这些字段 HistoryItem 不直接提供，所以在这里补全。
+ * model / service 只有展示名（历史表不存对象），没有真实对象引用，
+ * 分支提交时后端会自己按 id 重新解析，这里用 displayName 占位即可。
+ */
+function toTask(h: HistoryItem): GenerateTask {
+  return {
+    id: h.id,
+    status: "completed",
+    progress: 100,
+    stage: "完成",
+    request: {
+      serviceId: h.serviceId ?? "",
+      modelId: h.modelId ?? "",
+      prompt: h.prompt,
+      negativePrompt: h.negativePrompt,
+      count: h.count,
+      aspectRatio: h.aspectRatio,
+      size: h.size,
+      seed: h.seed ?? -1,
+      parameters: h.parameters,
+    },
+    images: h.images,
+    costCredits: h.costCredits,
+    durationMs: h.durationMs,
+    createdAt: h.createdAt,
+    parentTaskId: h.parentTaskId,
+    parentImageId: h.parentImageId,
+    rootImageId: h.rootImageId,
+  };
+}
+
+/**
  * HistoryPage — 生成历史页（/history）。
  *
  * 它是工作台的「回溯」面：所有生成结果自动落库到这里，用户可以翻旧账、
@@ -97,6 +137,12 @@ export default function HistoryPage() {
   const set = useStudio((s) => s.set);
   const applyHistoryItem = useStudio((s) => s.applyHistoryItem);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 二次创作：用户在历史卡片上点「二次创作」时，记下选中的父任务与父图，
+  // 弹出全屏树状画布（TreeCanvas），和工作台主页的分支流程共用同一组件。
+  const [branchTarget, setBranchTarget] = useState<{
+    task: GenerateTask;
+    image: GeneratedImage;
+  } | null>(null);
 
   /**
    * reuse — 「复用参数」按钮的回调，历史页 → 工作台的主通道。
@@ -109,6 +155,19 @@ export default function HistoryPage() {
   const reuse = (h: HistoryItem) => {
     applyHistoryItem(h, { lockSeed: true });
     router.push("/");
+  };
+
+  /**
+   * branch — 历史卡片上「二次创作」的回调。
+   *
+   * 和 reuse 不同：reuse 是把参数填回工作台重新生成（消耗 token），
+   * branch 是直接在原图基础上改 prompt / 取变体 / 图生图，产出带版本树链路的子任务。
+   * 卡片展示的是首图，所以默认基于 h.images[0] 分支；分支提交由 TreeCanvas 内部完成。
+   */
+  const branch = (h: HistoryItem) => {
+    const img = h.images[0];
+    if (!img) return;
+    setBranchTarget({ task: toTask(h), image: img });
   };
 
   /**
@@ -280,10 +339,12 @@ export default function HistoryPage() {
                 </div>
               </div>
 
-              body — 缩略图下方的信息区，flex-1 撑开，自上而下：
-          prompt（2 行截断）→ 模型/尺寸/比例标签行 → 时间 + 耗时/消费。
-          耗时和消费挤在同一行右侧，用 font-mono 对齐，方便扫一眼就知道
-          「什么时候跑的、花了多久、多少钱」。
+              {/* body — 缩略图下方的信息区，flex-1 撑开，自上而下：
+
+                  prompt（2 行截断）→ 模型/尺寸/比例标签行 → 时间 + 耗时/消费。
+                  耗时和消费挤在同一行右侧，用 font-mono 对齐，方便扫一眼就知道
+                  「什么时候跑的、花了多久、多少钱」。
+               */}
               <div className="flex flex-1 flex-col gap-2 p-3">
                 <p className="line-clamp-2 text-xs text-ink-2">{h.prompt}</p>
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-ink-3">
@@ -300,12 +361,19 @@ export default function HistoryPage() {
                 </div>
               </div>
 
-              actions — 卡片底部 border-t 条上的操作按钮，始终可见（不依赖 hover）。
-          从左到右：复用参数 → 重试 → 收藏 → 复制参数 JSON → 下载（有图时）→ 删除。
-          删除按钮带 ml-auto 挤到最右，把常用操作聚在左侧。
-          之所以全部用 ActionBtn（图标 + title/aria-label）而不是文字按钮：
-          横向空间有限，图标一行能塞下 6 个动作，文字按钮一行最多 3-4 个。
+              {/* actions — 卡片底部 border-t 条上的操作按钮，始终可见（不依赖 hover）。
+
+                  从左到右：复用参数 → 重试 → 收藏 → 复制参数 JSON → 下载（有图时）→ 删除。
+                  删除按钮带 ml-auto 挤到最右，把常用操作聚在左侧。
+                  之所以全部用 ActionBtn（图标 + title/aria-label）而不是文字按钮：
+                  横向空间有限，图标一行能塞下 6 个动作，文字按钮一行最多 3-4 个。
+               */}
               <div className="flex items-center gap-1 border-t border-line px-2 py-1.5">
+                <ActionBtn
+                  icon={ImagePlus}
+                  label="二次创作（在原图基础上改 prompt / 变体 / 图生图）"
+                  onClick={() => branch(h)}
+                />
                 <ActionBtn
                   icon={SlidersHorizontal}
                   label="复用参数（回到工作台，锁定 seed）"
@@ -354,9 +422,23 @@ export default function HistoryPage() {
           ))}
         </div>
       )}
+
+    {branchTarget && (
+      <Portal>
+        <TreeCanvas
+          task={branchTarget.task}
+          image={branchTarget.image}
+          onClose={() => setBranchTarget(null)}
+          onStarted={() => {}}
+        />
+      </Portal>
+    )}
     </div>
   );
 }
+
+/**
+   * ActionBtn
 
 /**
    * ActionBtn — 历史卡片操作栏的通用图标按钮。

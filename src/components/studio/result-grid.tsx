@@ -8,41 +8,38 @@ import {
   Star,
   Copy,
   Trash2,
+  ImagePlus,
 } from "lucide-react";
 import type { GeneratedImage, GenerateTask } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { ImageViewer } from "./image-viewer";
-import { BranchModifyPanel, BranchAction } from "./branch-modify";
+import { Portal } from "@/components/ui/portal";
 
 /**
  * 结果网格 — 工作台展示组件。
  *
- * 把任务生成的图片按 1 张单列 / 多张双列网格渲染，hover 时浮现
- * 下载、放大、收藏、复制 Prompt、继续修改、删除六个操作按钮，
- * 点击图片可进入全屏查看器（ImageViewer）。收藏状态仅本地记忆。
- *
- * 每张图的「继续修改」按钮会弹出 BranchModifyPanel：在该图基础上改 prompt /
- * 取变体 / 图生图，产生一个带版本树链路的子任务。这是「无限画布」功能的一期入口。
+ * 把任务生成的图片按 1 张单列 / 多张双列网格渲染。辅助操作（下载、放大、收藏、
+ * 复制 Prompt、删除）走 hover 浮层，不常显；只有「二次创作」用主色胶囊按钮
+ * 常驻在图片下方，一眼就能找到这个「无限画布」的一期入口 —— 点击后由父页面
+ * 弹出 BranchModifyPanel，在该图基础上改 prompt / 取变体 / 图生图，
+ * 产生一个带版本树链路的子任务。点击图片可进入全屏查看器（ImageViewer）。
+ * 收藏状态仅本地记忆。
  *
  * 交互对象：
  *   - useStudio store（无直接依赖，纯展示）
- *   - 子组件 ImageViewer / BranchModifyPanel / BranchAction
+ *   - 子组件 ImageViewer
  */
-
-const HOVER_ACTIONS = [
-  { icon: Download, label: "下载" },
-  { icon: Maximize2, label: "放大" },
-  { icon: Star, label: "收藏" },
-  { icon: Copy, label: "复制 Prompt" },
-] as const;
 
 export function ResultGrid({
   task,
   onBranch,
+  onRemove,
 }: {
   task: GenerateTask;
-  /** 点击「继续修改」时的回调，由父页面决定如何处理（弹面板 / 跳转）。 */
+  /** 点击「二次创作」时的回调，由父页面决定如何处理（弹面板 / 跳转）。 */
   onBranch?: (task: GenerateTask, image: GeneratedImage) => void;
+  /** 点击「删除」时的回调，由父页面负责清理历史与任务。 */
+  onRemove?: (taskId: string) => void;
 }) {
   const [viewerIdx, setViewerIdx] = useState<number | null>(null);
   const [favSet, setFavSet] = useState<Set<string>>(new Set());
@@ -95,79 +92,96 @@ export function ResultGrid({
           const ratio = img.width && img.height ? img.width / img.height : 1;
           const heightBudget =
             task.images.length === 1
-              ? "(100dvh - 12rem)"
+              ? "(100dvh - 13.5rem)" // 单图：给下方常驻的「二次创作」留出空间
               : "((100dvh - 13.5rem) / 2)";
           return (
-          <figure
-            key={img.id}
-            className="group relative mx-auto overflow-hidden rounded-lg border border-line bg-paper-3 animate-fade-up"
-            style={{
-              aspectRatio: `${ratio}`,
-              width: `min(100%, calc(${heightBudget} * ${ratio}))`,
-              animationDelay: `${i * 60}ms`,
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={img.url}
-              alt={task.request.prompt.slice(0, 60)}
-              className="h-full w-full object-cover transition-transform duration-500 ease-[var(--ease-out)] group-hover:scale-[1.03]"
-            />
+          <div key={img.id} className="flex flex-col items-center gap-2">
+            <figure
+              className="group relative mx-auto overflow-hidden rounded-lg border border-line bg-paper-3 animate-fade-up"
+              style={{
+                aspectRatio: `${ratio}`,
+                width: `min(100%, calc(${heightBudget} * ${ratio}))`,
+                animationDelay: `${i * 60}ms`,
+              }}
+              onClick={() => setViewerIdx(i)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={img.url}
+                alt={task.request.prompt.slice(0, 60)}
+                className="h-full w-full cursor-pointer object-cover transition-transform duration-500 ease-[var(--ease-out)] group-hover:scale-[1.03]"
+              />
 
-            {/* hover overlay */}
-            <figcaption className="absolute inset-0 flex flex-col justify-between bg-gradient-to-t from-black/80 via-black/0 to-black/0 p-2 opacity-0 transition-opacity duration-[var(--dur-base)] ease-[var(--ease-out)] group-hover:opacity-100">
-              <div className="flex justify-end">
-                {favSet.has(img.id) && (
-                  <span className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-accent backdrop-blur-sm">
-                    <Star className="h-3.5 w-3.5 fill-accent" />
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center justify-between gap-1">
-                <div className="flex gap-1">
-                  <HoverAction
-                    icon={Download}
-                    label="下载"
-                    onClick={() => download(img)}
-                  />
-                  <HoverAction
-                    icon={Maximize2}
-                    label="放大"
-                    onClick={() => setViewerIdx(i)}
-                  />
-                  <HoverAction
-                    icon={Star}
-                    label="收藏"
-                    active={favSet.has(img.id)}
-                    onClick={() => toggleFav(img.id)}
-                  />
-                  <HoverAction icon={Copy} label="复制" onClick={copyPrompt} />
-                </div>
-                <div className="flex gap-1">
-                  {onBranch && (
-                    <BranchAction
-                      task={task}
-                      image={img}
-                      onBranch={onBranch}
-                    />
+              {/* hover 浮层 —— 仅辅助操作（下载/放大/收藏/复制/删除），
+                  二次创作不放这里，避免和其他按钮挤在一起 */}
+              <figcaption className="absolute inset-0 flex flex-col justify-between bg-gradient-to-t from-black/80 via-black/0 to-black/0 p-2 opacity-0 transition-opacity duration-[var(--dur-base)] ease-[var(--ease-out)] group-hover:opacity-100 pointer-events-none">
+                <div className="flex justify-end">
+                  {favSet.has(img.id) && (
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-accent backdrop-blur-sm">
+                      <Star className="h-3.5 w-3.5 fill-accent" />
+                    </span>
                   )}
-                  <HoverAction icon={Trash2} label="删除" danger />
                 </div>
-              </div>
-            </figcaption>
-          </figure>
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex gap-1">
+                    <HoverAction
+                      icon={Download}
+                      label="下载"
+                      onClick={() => download(img)}
+                    />
+                    <HoverAction
+                      icon={Maximize2}
+                      label="放大"
+                      onClick={() => setViewerIdx(i)}
+                    />
+                    <HoverAction
+                      icon={Star}
+                      label={favSet.has(img.id) ? "取消收藏" : "收藏"}
+                      active={favSet.has(img.id)}
+                      onClick={() => toggleFav(img.id)}
+                    />
+                    <HoverAction icon={Copy} label="复制" onClick={copyPrompt} />
+                  </div>
+                  <div className="flex gap-1">
+                    <HoverAction
+                      icon={Trash2}
+                      label="删除"
+                      danger
+                      onClick={() => onRemove?.(task.id)}
+                    />
+                  </div>
+                </div>
+              </figcaption>
+            </figure>
+
+            {/* 二次创作 —— 始终可见，放在图片下方，一眼就能找到入口。
+                其他操作走上面的 hover 浮层，不挤在这里。 */}
+            {onBranch && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onBranch(task, img); }}
+                title="二次创作这张图"
+                className="flex h-8 items-center gap-1.5 rounded-full bg-accent px-3 text-xs font-semibold text-white shadow-lg shadow-black/30 transition hover:bg-accent-2 hover:scale-[1.03]"
+              >
+                <ImagePlus className="h-3.5 w-3.5" />
+                二次创作
+              </button>
+            )}
+          </div>
           );
         })}
       </div>
 
       {viewerIdx !== null && (
-        <ImageViewer
-          images={task.images}
-          index={viewerIdx}
-          onClose={() => setViewerIdx(null)}
-          onIndex={setViewerIdx}
-          task={task}
-        />
+        <Portal>
+          <ImageViewer
+            images={task.images}
+            index={viewerIdx}
+            onClose={() => setViewerIdx(null)}
+            onIndex={setViewerIdx}
+            task={task}
+          />
+        </Portal>
       )}
     </>
   );
@@ -195,7 +209,7 @@ function HoverAction({
       title={label}
       aria-label={label}
       className={cn(
-        "flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-ink-2 backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-ink",
+        "flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-ink-2 backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-ink pointer-events-auto",
         active && "text-accent",
         danger && "hover:text-danger"
       )}

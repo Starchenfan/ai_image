@@ -71,9 +71,10 @@ async function ensureSchema() {
         duration_ms BIGINT NOT NULL DEFAULT 0,
         favorite TINYINT(1) NOT NULL DEFAULT 0,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        // 版本树链路 —— 「继续修改」产生分支任务时，把父任务 id 与根图 id
-        // 写进每一张图，重启后 /history 仍能还原整棵分支树。
+        -- 版本树链路 —— 「二次创作」产生分支任务时，把父任务 id、父图 id 与根图 id
+        -- 写进每一张图，重启后 /history 仍能还原整棵分支树。
         parent_task_id VARCHAR(64) NULL,
+        parent_image_id VARCHAR(64) NULL,
         root_image_id VARCHAR(64) NULL,
         INDEX idx_generated_images_task_id (task_id),
         INDEX idx_generated_images_created_at (created_at),
@@ -98,6 +99,7 @@ async function ensureSchema() {
         duration_ms: "BIGINT NOT NULL DEFAULT 0",
         favorite: "TINYINT(1) NOT NULL DEFAULT 0",
         parent_task_id: "VARCHAR(64) NULL",
+        parent_image_id: "VARCHAR(64) NULL",
         root_image_id: "VARCHAR(64) NULL",
       };
 
@@ -150,8 +152,8 @@ export async function persistGeneratedImages(
             prompt, negative_prompt, model_name, service_name, service_id,
             model_id, request_seed, aspect_ratio,
             image_size, parameters, cost_credits, duration_ms, favorite, created_at,
-            // 版本树链路 —— 分支任务的父任务 id 与根图 id，重启后仍可还原分支树
-            parent_task_id, root_image_id
+            -- 版本树链路 —— 分支任务的父任务 id、父图 id 与根图 id，重启后仍可还原分支树
+            parent_task_id, parent_image_id, root_image_id
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             file_path = VALUES(file_path), mime_type = VALUES(mime_type),
@@ -163,7 +165,7 @@ export async function persistGeneratedImages(
             aspect_ratio = VALUES(aspect_ratio),
             image_size = VALUES(image_size), parameters = VALUES(parameters),
             cost_credits = VALUES(cost_credits), duration_ms = VALUES(duration_ms),
-            parent_task_id = VALUES(parent_task_id), root_image_id = VALUES(root_image_id)`,
+            parent_task_id = VALUES(parent_task_id), parent_image_id = VALUES(parent_image_id), root_image_id = VALUES(root_image_id)`,
           [
             image.id,
             task.id,
@@ -188,6 +190,7 @@ export async function persistGeneratedImages(
             task.favorite ? 1 : 0,
             new Date(task.completedAt || Date.now()),
             task.parentTaskId || null,
+            task.parentImageId || null,
             task.rootImageId || null,
           ]
         );
@@ -225,6 +228,8 @@ type HistoryRow = RowDataPacket & {
   created_at: Date | string;
   /** 版本树链路 —— 分支任务的父任务 id，根任务为 null。 */
   parent_task_id: string | null;
+  /** 作为种子的那张父图 id。 */
+  parent_image_id: string | null;
   /** 这条分支 ultimately 来自哪张根图对应的任务 id。 */
   root_image_id: string | null;
 };
@@ -254,7 +259,7 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
       model_name, service_name, service_id, model_id, request_seed,
       aspect_ratio, image_size, parameters,
       cost_credits, duration_ms, favorite, created_at,
-      parent_task_id, root_image_id
+      parent_task_id, parent_image_id, root_image_id
       FROM generated_images
       ORDER BY created_at DESC, task_id, id`);
 
@@ -281,6 +286,7 @@ export async function getPersistedHistory(): Promise<HistoryItem[] | null> {
         parameters: parseParameters(row.parameters),
         // 版本树链路 —— 从持久化层原样带回，重启后分支树不丢
         parentTaskId: row.parent_task_id || undefined,
+        parentImageId: row.parent_image_id || undefined,
         rootImageId: row.root_image_id || undefined,
       };
       item.images.push({

@@ -14,7 +14,8 @@ import { ReferenceImageUpload } from "@/components/studio/reference-image";
 import { GenerateButton } from "@/components/studio/generate-button";
 import { TaskStatus } from "@/components/studio/task-status";
 import { ResultGrid } from "@/components/studio/result-grid";
-import { BranchModifyPanel } from "@/components/studio/branch-modify";
+import { TreeCanvas } from "@/components/studio/tree-canvas";
+import { Portal } from "@/components/ui/portal";
 import { CompareBoard, type CompareEntry } from "@/components/studio/compare-board";
 import type { AiModel, GenerateTask, GeneratedImage } from "@/lib/types";
 
@@ -52,7 +53,7 @@ export default function StudioPage() {
   const prompt = useStudio((s) => s.prompt);
   const [genError, setGenError] = useState<string | null>(null);
   const [compareEntries, setCompareEntries] = useState<CompareEntry[] | null>(null);
-  // 分支修改面板：用户在某张已生成图上点「继续修改」时，记录选中的父图。
+  // 分支修改面板：用户在某张已生成图上点「二次创作」时，记录选中的父图。
   const [branchTarget, setBranchTarget] = useState<{
     task: GenerateTask;
     image: GeneratedImage;
@@ -170,7 +171,7 @@ export default function StudioPage() {
   };
 
   /**
-   * handleBranch — 在某张已生成图上点「继续修改」。
+   * handleBranch — 在某张已生成图上点「二次创作」。
    *
    * 只负责记下选中的父图，弹出 BranchModifyPanel 让用户描述怎么改。
    * 真正的提交由面板自己发请求，成功后回调 handleBranchStarted。
@@ -182,14 +183,38 @@ export default function StudioPage() {
   /**
    * handleBranchStarted — 分支任务提交成功。
    *
-   * 链路（parentTaskId / branchId / rootImageId）已由服务端写进新任务，
-   * 这里只需要把画布切到轮询态。父任务仍在 /history 里，
-   * 二期的画布视图会用它还原整棵分支树。
+   * 全屏树状画布（TreeCanvas）自己管理分支提交与轮询：提交后画布保持打开，
+   * 新节点以 pending 态出现，2s 轮询到完成再换成真实图片，整棵树在画布上长出来。
+   * 这里不关闭画布、也不切底层画布状态——onStarted 只是通知「分支已创建」，
+   * 画布自己会推进。用户点 Esc / 关闭按钮时才回到右侧画布。
    */
-  const handleBranchStarted = (taskId: string) => {
-    setBranchTarget(null);
-    set("results", null);
-    set("activeTaskId", taskId);
+  const handleBranchStarted = (_taskId: string) => {
+    // no-op: TreeCanvas handles its own polling and node lifecycle.
+  };
+
+  /**
+   * handleRemove — 删除当前结果里的一张图（整组结果）。
+   *
+   * 走 /api/history/:id 的 DELETE（同时清掉 MySQL/本地文件与内存 db.history），
+   * 并把 store 里的 results / activeTaskId 一并清空，画布回到空状态。
+   */
+  const handleRemove = async (taskId: string) => {
+    if (!confirm("确定删除这次生成记录吗？此操作不可撤销。")) return;
+    try {
+      const r = await fetch(`/api/history/${taskId}`, { method: "DELETE" });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        setGenError(j.error || "删除失败");
+        return;
+      }
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : "删除失败");
+      return;
+    }
+    if (results && results.id === taskId) {
+      set("results", null);
+      set("activeTaskId", null);
+    }
   };
 
   return (
@@ -266,18 +291,20 @@ export default function StudioPage() {
                 </p>
               </div>
             </div>
-            <ResultGrid task={results} onBranch={handleBranch} />
+            <ResultGrid task={results} onBranch={handleBranch} onRemove={handleRemove} />
           </div>
         ) : (
           <EmptyState />
         )}
         {branchTarget && (
-          <BranchModifyPanel
-            task={branchTarget.task}
-            image={branchTarget.image}
-            onClose={() => setBranchTarget(null)}
-            onStarted={handleBranchStarted}
-          />
+          <Portal>
+            <TreeCanvas
+              task={branchTarget.task}
+              image={branchTarget.image}
+              onClose={() => setBranchTarget(null)}
+              onStarted={handleBranchStarted}
+            />
+          </Portal>
         )}
       </section>
     </div>

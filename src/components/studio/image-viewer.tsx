@@ -81,10 +81,11 @@ export function ImageViewer({
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <ViewerBtn icon={zoomed ? ZoomOut : ZoomIn} onClick={() => setZoomed((z) => !z)} />
-          <ViewerBtn icon={Maximize} onClick={() => setZoomed(true)} />
+          <ViewerBtn icon={zoomed ? ZoomOut : ZoomIn} ariaLabel={zoomed ? "缩小" : "放大"} onClick={() => setZoomed((z) => !z)} />
+          <ViewerBtn icon={Maximize} ariaLabel="全屏" onClick={() => setZoomed(true)} />
           <ViewerBtn
             icon={Download}
+            ariaLabel="下载"
             onClick={async () => {
               const ext = img.url.startsWith("data:")
                 ? "png"
@@ -109,9 +110,10 @@ export function ImageViewer({
           />
           <ViewerBtn
             icon={Copy}
+            ariaLabel="复制 Prompt"
             onClick={() => void navigator.clipboard.writeText(task.request.prompt)}
           />
-          <ViewerBtn icon={X} onClick={onClose} />
+          <ViewerBtn icon={X} onClick={onClose} ariaLabel="关闭" />
         </div>
       </div>
 
@@ -135,7 +137,10 @@ export function ImageViewer({
         <img
           src={img.url}
           alt={task.request.prompt.slice(0, 60)}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setZoomed((z) => !z);
+          }}
           className={cn(
             "max-h-full max-w-full rounded-lg object-contain shadow-lift transition-transform duration-300 ease-[var(--ease-out)]",
             zoomed ? "scale-150 cursor-zoom-out" : "cursor-zoom-in"
@@ -187,13 +192,16 @@ export function ImageViewer({
 function ViewerBtn({
   icon: Icon,
   onClick,
+  ariaLabel,
 }: {
   icon: typeof X;
   onClick: () => void;
+  ariaLabel?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      aria-label={ariaLabel}
       className="flex h-8 w-8 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-white/10 hover:text-ink"
     >
       <Icon className="h-4 w-4" />

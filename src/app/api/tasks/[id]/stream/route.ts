@@ -15,16 +15,29 @@ export async function GET(
         if (closed) return;
         const task = getTask(params.id);
         if (!task) {
-          controller.enqueue(
-            encoder.encode(`event: error\ndata: ${JSON.stringify({ error: "not found" })}\n\n`)
-          );
+          try {
+            controller.enqueue(
+              encoder.encode(`event: error\ndata: ${JSON.stringify({ error: "not found" })}\n\n`)
+            );
+          } catch {
+            /* 客户端已断连，controller 已 closed，终止轮询 */
+            closed = true;
+            clearInterval(timer);
+            return;
+          }
           controller.close();
           closed = true;
           return;
         }
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify(task)}\n\n`)
-        );
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(task)}\n\n`)
+          );
+        } catch {
+          closed = true;
+          clearInterval(timer);
+          return;
+        }
         if (task.status === "completed" || task.status === "failed" || task.status === "canceled") {
           controller.close();
           closed = true;

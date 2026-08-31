@@ -138,6 +138,7 @@ export default function AdminPage() {
           「在线」标 accent，因为它是唯一带判断性质的指标——用户关心的是
           「现在有几个人能用」，不是「一共接了多少」。
           API Key 显示「已加密」而不是具体掩码，因为列表页不承担展示密钥的任务（详情页才展示）。
+       */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard icon={Server} label="服务总数" value={String(services.length)} />
         <StatCard icon={Activity} label="在线" value={String(online)} accent />
@@ -174,10 +175,10 @@ export default function AdminPage() {
             href={`/admin/services/${s.id}`}
             className="grid grid-cols-2 items-center gap-3 border-b border-line px-4 py-3 transition-colors last:border-b-0 hover:bg-paper-3/40 md:grid-cols-[2fr_1.2fr_1fr_0.8fr_0.6fr_40px]"
           >
-            name — 服务名 + Base URL。左侧状态点用 STATUS_STYLE 映射：
-          online 绿、offline/维护 灰、degraded/rate_limited 黄。
-          未知状态回退 bg-ink-3 灰，保证不会因为后端加了新状态而崩。
-          推荐服务额外标一个 accent 的「推荐」Badge。
+            {/* name — 服务名 + Base URL。左侧状态点用 STATUS_STYLE 映射：
+            online 绿、offline/维护 灰、degraded/rate_limited 黄。
+            未知状态回退 bg-ink-3 灰，保证不会因为后端加了新状态而崩。
+            推荐服务额外标一个 accent 的「推荐」Badge。 */}
             {/* name */}
             <div className="flex items-center gap-2.5">
               <span
@@ -198,26 +199,26 @@ export default function AdminPage() {
                 </span>
               </div>
             </div>
-            adapter — 后端适配器类型（openai / flux / stable_diffusion / custom / proxy），
-          outline Badge + font-mono，一眼看出这个服务走的是哪套协议。
+            {/* adapter — 后端适配器类型（openai / flux / stable_diffusion / custom / proxy），
+            outline Badge + font-mono，一眼看出这个服务走的是哪套协议。 */}
             {/* adapter */}
             <div className="hidden md:block">
               <Badge variant="outline" className="font-mono text-[10px]">
                 {s.adapterType}
               </Badge>
             </div>
-            status — 服务当前状态文本（online / offline / degraded / rate_limited / maintenance）。
+            {/* status — 服务当前状态文本（online / offline / degraded / rate_limited / maintenance）。 */}
             {/* status */}
             <div className="hidden md:block">
               <span className="text-xs text-ink-2">{s.status}</span>
             </div>
-            latency — 后端探测到的响应延迟，font-mono 等宽方便横向比较谁快谁慢。
+            {/* latency — 后端探测到的响应延迟，font-mono 等宽方便横向比较谁快谁慢。 */}
             {/* latency */}
             <div className="hidden font-mono text-xs text-ink-3 md:block">
               {s.latencyMs}ms
             </div>
-            key — API Key 的掩码串（如 sk-****1234）。列表页只展示掩码，
-          明文只在详情页「覆盖 Key」输入框里出现，且保存时才发给后端。
+            {/* key — API Key 的掩码串（如 sk-****1234）。列表页只展示掩码，
+            明文只在详情页「覆盖 Key」输入框里出现，且保存时才发给后端。 */}
             {/* key */}
             <div className="hidden font-mono text-[10px] text-ink-3 md:block">
               {s.apiKeyMasked}
@@ -639,13 +640,13 @@ function ImportNewApiDialog({
               </span>
               <span className="font-mono text-ink-3">{result.apiKeyMasked}</span>
             </div>
-            模型列表 — Step 2 的主体。max-h-72 限高 + overflow-y-auto，
-          让几十个模型也能滚动而不是把对话框撑出屏幕。
-          每行是一个 button（而非 checkbox 组件），整行点击切换勾选态，
-          左侧自绘勾选框（border-accent + CheckCircle2）——
-          之所以不直接用原生 checkbox：样式完全可控，和设计系统一致。
-          中转站不区分图像/对话模型，「图像?」Badge 仅按命名启发式判断，
-          所以底部有行小字提醒用户按需勾选。
+            {/* 模型列表 — Step 2 的主体。max-h-72 限高 + overflow-y-auto，
+            让几十个模型也能滚动而不是把对话框撑出屏幕。
+            每行是一个 button（而非 checkbox 组件），整行点击切换勾选态，
+            左侧自绘勾选框（border-accent + CheckCircle2）——
+            之所以不直接用原生 checkbox：样式完全可控，和设计系统一致。
+            中转站不区分图像/对话模型，「图像?」Badge 仅按命名启发式判断，
+            所以底部有行小字提醒用户按需勾选。 */}
             <div className="max-h-72 space-y-1 overflow-y-auto rounded-md border border-line p-1.5">
               {result.items.map((it) => {
                 const checked = selected.has(it.id);

@@ -104,6 +104,7 @@ export async function persistGeneratedImagesLocal(
     parameters: task.request.parameters,
     // 版本树链路 —— 本地后端也要带上，重启后分支树不丢
     parentTaskId: task.parentTaskId,
+    parentImageId: task.parentImageId,
     rootImageId: task.rootImageId,
   };
   await writeMeta(item);

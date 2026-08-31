@@ -100,7 +100,7 @@ export interface GenerateRequest {
 }
 
 /**
- * 分支请求 —— 在某个已生成图片的基础上「继续修改」。
+ * 分支请求 —— 在某个已生成图片的基础上「二次创作」。
  *
  * 与 GenerateRequest 的区别：它不重新描述整套参数，而是继承父任务的
  * model/service/params，只额外指定「改哪张图、怎么改」。服务端会把父图
@@ -173,7 +173,7 @@ export interface GenerateTask {
   completedAt?: number;
   durationMs?: number;
   favorite?: boolean;
-  // ── 版本树链路（「继续修改」功能） ──
+  // ── 版本树链路（「二次创作」功能） ──
   /** 父任务 id。根任务为 undefined。 */
   parentTaskId?: string;
   /** 作为种子的那张父图 id。多图任务里可以指定改的是哪一张。 */
@@ -188,7 +188,7 @@ export interface GenerateTask {
   modificationPrompt?: string;
 }
 
-/** 「继续修改」的三种模式。 */
+/** 「二次创作」的三种模式。 */
 export type BranchMode = "reprompt" | "variant" | "edit";
 
 export interface HistoryItem {
@@ -212,8 +212,12 @@ export interface HistoryItem {
   createdAt: number;
   favorite?: boolean;
   parameters: Record<string, number | string | boolean>;
-  /** 版本树链路：这条历史记录是否由某次「继续修改」产生。 */
+  /** 版本树链路：这条历史记录是否由某次「二次创作」产生。 */
   parentTaskId?: string;
+  /** 这次分支所基于的那张父图 id（父任务 images[] 中的某一项）。
+   *  树状画布靠它还原「子节点挂在父节点哪张图上」，只记 parentTaskId
+   *  不够（父任务可能多图，会指错位置）。 */
+  parentImageId?: string;
   /** 这条分支 ultimately 来自哪张根图。 */
   rootImageId?: string;
 }

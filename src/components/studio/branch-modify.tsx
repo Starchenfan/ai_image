@@ -1,20 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { ImagePlus, X, Loader2, GitBranch } from "lucide-react";
+import { ImagePlus, X, Loader2 } from "lucide-react";
 import { useStudio } from "@/lib/store";
 import type { GenerateTask, GeneratedImage } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
 /**
- * 分支修改面板 — 在某张已生成图的基础上「继续修改」。
+ * 分支修改面板 — 在某张已生成图的基础上「二次创作」。
  *
  * 三种模式对应三种「怎么改」：
  *   - 改 prompt：保留原 prompt，把用户写的修改指令拼在后面，重新生成
  *   - 变体：prompt 不变，seed 重新随机，得到一张「同prompt不同结果」
  *   - 图生图：把父图当参考图传给 adapter，真正以图生图
  *
- * 选中某张图点「继续修改」后弹出。提交后交回给父页面切到轮询态，
+ * 选中某张图点「二次创作」后弹出。提交后交回给父页面切到轮询态，
  * 链路（parentTaskId / branchId / rootImageId）由服务端写进新任务。
  */
 export function BranchModifyPanel({
@@ -97,8 +97,8 @@ export function BranchModifyPanel({
         {/* 头部 */}
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div className="flex items-center gap-2">
-            <GitBranch className="h-4 w-4 text-accent" />
-            <span className="text-sm font-medium text-ink">继续修改</span>
+            <ImagePlus className="h-4 w-4 text-accent" />
+            <span className="text-sm font-medium text-ink">二次创作</span>
           </div>
           <button
             onClick={onClose}
@@ -210,35 +210,5 @@ export function BranchModifyPanel({
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * BranchAction — 结果网格里每张图 hover 时的「继续修改」按钮。
- *
- * 替换原先的「重新生成」（那是个空桩）。点击后弹出 BranchModifyPanel，
- * 把「从这张图继续改」的入口直接放在图上，符合直觉。
- */
-export function BranchAction({
-  task,
-  image,
-  onBranch,
-}: {
-  task: GenerateTask;
-  image: GeneratedImage;
-  onBranch: (task: GenerateTask, image: GeneratedImage) => void;
-}) {
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onBranch(task, image);
-      }}
-      title="继续修改"
-      aria-label="继续修改"
-      className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-accent backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-ink"
-    >
-      <GitBranch className="h-3.5 w-3.5" />
-    </button>
   );
 }

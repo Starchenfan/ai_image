@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { readImage, imageFileExtension } from "@/lib/image-utils";
 import { enqueueTask } from "@/lib/task-runner";
+import { getPersistedHistoryItem } from "@/lib/image-storage";
 import { uid } from "@/lib/cn";
-import type { BranchRequest, GenerateParams } from "@/lib/types";
+import type { BranchRequest, GenerateParams, GenerateTask, HistoryItem } from "@/lib/types";
 
 /**
- * POST /api/tasks/:id/branch — 在某张已生成图片的基础上「继续修改」。
+ * POST /api/tasks/:id/branch — 在某张已生成图片的基础上「二次创作」。
  *
  * 这是「版本树」功能的写入口。客户端不需要重新描述整套参数——服务端从父任务
  * 继承 model / service / count / aspectRatio / size / parameters，只额外接收
@@ -27,12 +28,61 @@ import type { BranchRequest, GenerateParams } from "@/lib/types";
  *   - 503 父任务对应的服务当前不在线
  *   - 402 Credits 不足
  */
+/**
+ * resolveParentTask — 解析分支所需的父任务。
+ *
+ * 优先从进程内存 db.tasks 取（同一会话内生成的任务都在这里）；
+ * dev server 重启后内存清空，但历史已持久化到 MySQL，此时回退到
+ * getPersistedHistoryItem 从 MySQL 拉取，并用 db.services / db.models /
+ * db.apiKeys 补全 model / service / apiKey，重建出分支所需的完整 task。
+ */
+async function resolveParentTask(id: string): Promise<GenerateTask | null> {
+  const inMem = db.tasks.get(id);
+  if (inMem) return inMem;
+
+  const item = await getPersistedHistoryItem(id);
+  if (!item) return null;
+
+  const service = db.services.find((s) => s.id === item.serviceId)
+    ?? db.services.find((s) => s.name === item.serviceName);
+  const model = db.models.find((m) => m.id === item.modelId)
+    ?? db.models.find((m) => m.displayName === item.modelName);
+  if (!service || !model) return null;
+
+  return {
+    id: item.id,
+    status: "completed",
+    progress: 100,
+    stage: "完成",
+    request: {
+      serviceId: item.serviceId ?? service.id,
+      modelId: item.modelId ?? model.id,
+      prompt: item.prompt,
+      negativePrompt: item.negativePrompt,
+      count: item.count,
+      aspectRatio: item.aspectRatio,
+      size: item.size,
+      seed: item.seed ?? -1,
+      parameters: item.parameters,
+    },
+    model,
+    service,
+    images: item.images,
+    costCredits: item.costCredits,
+    durationMs: item.durationMs,
+    createdAt: item.createdAt,
+    parentTaskId: item.parentTaskId,
+    parentImageId: item.parentImageId,
+    rootImageId: item.rootImageId,
+  };
+}
+
 export async function POST(
   req: Request,
   { params }: { params: { id: string } }
 ) {
   const body = (await req.json()) as BranchRequest;
-  const parent = db.tasks.get(params.id);
+  const parent = await resolveParentTask(params.id);
   if (!parent) {
     return NextResponse.json({ error: "父任务不存在" }, { status: 404 });
   }

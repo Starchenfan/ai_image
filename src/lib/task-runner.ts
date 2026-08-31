@@ -15,7 +15,7 @@ function assert(v: unknown, msg: string): asserts v {
 }
 
 /**
- * 版本树链路 —— 「继续修改」功能在任务上的投影。
+ * 版本树链路 —— 「二次创作」功能在任务上的投影。
  *
  * 分支任务由 /api/tasks/[id]/branch 创建，服务端把父任务的 model/service/参数
  * 继承过来，再叠加 overrides。这里只负责把这些链路字段写进任务对象，
@@ -161,6 +161,7 @@ function pushHistory(task: GenerateTask) {
     parameters: task.request.parameters,
     // 版本树链路 —— 让历史记录也能还原整棵分支树
     parentTaskId: task.parentTaskId,
+    parentImageId: task.parentImageId,
     rootImageId: task.rootImageId,
   });
   if (db.history.length > 200) db.history.length = 200;
