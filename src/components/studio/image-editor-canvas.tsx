@@ -64,7 +64,6 @@ interface ImageEditorCanvasProps {
   showMask: boolean;
   onMaskChange: (maskDataUrl: string | null) => void;
   onCropChange: (crop: CropRect | null) => void;
-  onExportCanvas: (canvas: HTMLCanvasElement) => void;
   onImageCanvasReady: (canvas: HTMLCanvasElement) => void;
 }
 
@@ -76,7 +75,10 @@ interface DrawState {
   startY: number;
   lastX: number;
   lastY: number;
-  // 临时形状预览（不提交到图层）
+  // 临时预览坐标（屏幕坐标，用于 crop/shape 预览）
+  previewX: number;
+  previewY: number;
+  // 临时形状预览
   previewShape: { type: string; x: number; y: number; w: number; h: number } | null;
 }
 
@@ -101,27 +103,216 @@ export function ImageEditorCanvas({
   showMask,
   onMaskChange,
   onCropChange,
-  onExportCanvas,
   onImageCanvasReady,
 }: ImageEditorCanvasProps) {
+  // ── Refs（高频交互状态，不触发 React render） ──
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement | null>(null);
+  const maskPreviewRef = useRef<HTMLCanvasElement | null>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  // baseCanvas 缓存当前变换下的图像 — 避免每次 render 都重做 transform + drawImage
+  const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const baseDirtyRef = useRef(true);
   const drawRef = useRef<DrawState>({
     drawing: false,
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    lastY: 0,
+    startX: 0, startY: 0, lastX: 0, lastY: 0,
+    previewX: 0, previewY: 0,
     previewShape: null,
   });
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [panning, setPanning] = useState(false);
-  const [hoverCrop, setHoverCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // pan 用 ref，不触发 React render
+  const panRef = useRef({ x: 0, y: 0 });
+  // rAF 节流
+  const rafRef = useRef<number | null>(null);
+  // mask 脏标记 — 只在 mask 真正变化时才重新生成彩色预览
+  const maskDirtyRef = useRef(true);
+  // props 快照 — render 函数读此 ref，避免 callback identity 变化
+  const propsRef = useRef<ImageEditorCanvasProps | null>(null);
+  propsRef.current = {
+    image, transform, onTransformChange, crop, tool, brushColor, brushSize,
+    textColor, fontSize, shapeType, shapeColor, adjustments, filters,
+    textValue, showOverlay, showMask, onMaskChange, onCropChange,
+    onImageCanvasReady,
+  };
+
+  // ── 低频 React state ──
   const [textInput, setTextInput] = useState<{ x: number; y: number; value: string } | null>(null);
 
-  // 初始化内部 canvas
+  // ── Canvas 尺寸设置（只在初始化 / 容器尺寸变化时执行） ──
+  // 注意：不用 dpr 放大。用 dpr 会导致 backing store 坐标系与 CSS 像素不一致，
+  // clearRect(0,0,w,h) 只清掉左上角一小块，其余区域残留上一帧 → 拖动残影。
+  const setupCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    const h = Math.round(rect.height);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+  }, []);
+
+  // ResizeObserver 监听容器尺寸变化
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    setupCanvas();
+    const observer = new ResizeObserver(() => {
+      setupCanvas();
+      scheduleRender();
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [setupCanvas]);
+
+  // ── rAF 节流渲染 ──
+  const scheduleRender = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      render();
+    });
+  };
+
+  // ── 重新生成 Mask 彩色预览（只在 mask 真正变化时调用） ──
+  const regenerateMaskPreview = useCallback(() => {
+    const mask = maskRef.current;
+    const preview = maskPreviewRef.current;
+    if (!mask || !preview) return;
+    const mctx = mask.getContext("2d")!;
+    const pdata = preview.getContext("2d")!;
+    pdata.clearRect(0, 0, preview.width, preview.height);
+    // 用 globalCompositeOperation 快速上色：先铺红色，再用 destination-in 挖出 mask 形状
+    pdata.save();
+    pdata.globalCompositeOperation = "source-over";
+    pdata.fillStyle = "red";
+    pdata.fillRect(0, 0, preview.width, preview.height);
+    pdata.globalCompositeOperation = "destination-in";
+    pdata.drawImage(mask, 0, 0);
+    pdata.restore();
+    maskDirtyRef.current = false;
+  }, []);
+
+  // ── 主渲染函数（从 refs 读数据，不设 canvas.width/height） ──
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    const p = propsRef.current;
+    if (!canvas || !p || !imageCanvasRef.current) return;
+
+    const ctx = canvas.getContext("2d")!;
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // 显示缩放 = 适应容器 × transform.scale
+    const baseScale = Math.min(w / imageCanvasRef.current.width, h / imageCanvasRef.current.height);
+    const scale = baseScale * p.transform.scale;
+
+    // ── Base canvas 缓存：变换/图像变化时才重新生成 ──
+    // 注意：base canvas 不含 pan 偏移 — pan 在 render 时用 ctx.translate 应用，
+    // 否则 pan 每帧变化都会导致 base canvas 重新生成，缓存就失去意义。
+    if (baseDirtyRef.current || !baseCanvasRef.current) {
+      if (!baseCanvasRef.current) {
+        const bc = document.createElement("canvas");
+        bc.width = w;
+        bc.height = h;
+        baseCanvasRef.current = bc;
+      }
+      const bc = baseCanvasRef.current;
+      const bctx = bc.getContext("2d")!;
+      bctx.clearRect(0, 0, w, h);
+      bctx.save();
+      const offsetX = (w - imageCanvasRef.current.width * scale) / 2;
+      const offsetY = (h - imageCanvasRef.current.height * scale) / 2;
+      bctx.translate(offsetX, offsetY);
+      bctx.scale(p.transform.flipX ? -scale : scale, p.transform.flipY ? -scale : scale);
+      if (p.transform.flipX) bctx.translate(imageCanvasRef.current.width, 0);
+      if (p.transform.flipY) bctx.translate(0, imageCanvasRef.current.height);
+      bctx.rotate((p.transform.rotation * Math.PI) / 180);
+      bctx.translate(-imageCanvasRef.current.width / 2, -imageCanvasRef.current.height / 2);
+      bctx.translate(imageCanvasRef.current.width / 2, imageCanvasRef.current.height / 2);
+      // 调整滤镜
+      const filters: string[] = [];
+      if (p.adjustments.brightness !== 100) filters.push(`brightness(${p.adjustments.brightness}%)`);
+      if (p.adjustments.contrast !== 100) filters.push(`contrast(${p.adjustments.contrast}%)`);
+      if (p.adjustments.saturation !== 100) filters.push(`saturate(${p.adjustments.saturation}%)`);
+      if (p.adjustments.hue) filters.push(`hue-rotate(${p.adjustments.hue}deg)`);
+      if (p.adjustments.blur) filters.push(`blur(${p.adjustments.blur}px)`);
+      if (filters.length) bctx.filter = filters.join(" ");
+      else bctx.filter = "none";
+      bctx.drawImage(imageCanvasRef.current, 0, 0);
+      bctx.filter = "none";
+      bctx.restore();
+      baseDirtyRef.current = false;
+    }
+
+    // 快速清屏 + blit base canvas（canvas-to-canvas，GPU 加速）
+    // pan 偏移在这里应用 — 不烤进 base canvas
+    ctx.clearRect(0, 0, w, h);
+    ctx.save();
+    ctx.translate(panRef.current.x, panRef.current.y);
+    ctx.drawImage(baseCanvasRef.current!, 0, 0);
+
+    const offsetX = (w - imageCanvasRef.current.width * scale) / 2;
+    const offsetY = (h - imageCanvasRef.current.height * scale) / 2;
+
+    // 裁剪框 + 预览
+    const cropTarget = p.crop ?? (drawRef.current.drawing && (p.tool === "crop" || p.tool === "shape") ? {
+      x: Math.min(drawRef.current.startX, drawRef.current.lastX),
+      y: Math.min(drawRef.current.startY, drawRef.current.lastY),
+      w: Math.abs(drawRef.current.lastX - drawRef.current.startX),
+      h: Math.abs(drawRef.current.lastY - drawRef.current.startY),
+    } : null);
+
+    if (cropTarget && cropTarget.w > 0 && cropTarget.h > 0) {
+      const cx = cropTarget.x * scale + offsetX;
+      const cy = cropTarget.y * scale + offsetY;
+      const cw = cropTarget.w * scale;
+      const ch = cropTarget.h * scale;
+      ctx.save();
+      ctx.strokeStyle = p.tool === "shape" ? p.shapeColor : "#35c9ff";
+      ctx.lineWidth = p.tool === "shape" ? Math.max(2, p.fontSize / 12) : 2;
+      if (p.tool === "crop") ctx.setLineDash([6, 4]);
+      else ctx.setLineDash([]);
+      ctx.strokeRect(cx, cy, cw, ch);
+      if (p.tool === "crop") {
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.fillRect(0, 0, cx, h);
+        ctx.fillRect(cx + cw, 0, w - cx - cw, h);
+        ctx.fillRect(cx, 0, cw, cy);
+        ctx.fillRect(cx, cy + ch, cw, h - cy - ch);
+        // 手柄
+        ctx.fillStyle = "#35c9ff";
+        const hs = 8;
+        const handles = [
+          [cx, cy], [cx + cw, cy], [cx, cy + ch], [cx + cw, cy + ch],
+          [cx + cw / 2, cy], [cx + cw / 2, cy + ch],
+          [cx, cy + ch / 2], [cx + cw, cy + ch / 2],
+        ];
+        for (const [hx, hy] of handles) {
+          ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+        }
+      }
+      ctx.restore();
+    }
+
+    // Overlay 图层（在 pan translate 内，与图像对齐）
+    if (p.showOverlay && overlayRef.current) {
+      ctx.drawImage(overlayRef.current, 0, 0, w, h);
+    }
+
+    // Mask 预览（使用预生成的彩色预览 canvas，不重复做像素循环）
+    if (p.showMask && maskPreviewRef.current && maskPreviewRef.current.width > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.drawImage(maskPreviewRef.current, 0, 0, w, h);
+      ctx.restore();
+    }
+
+    ctx.restore(); // 对应 render 开头的 ctx.save()
+  }, []);
+
+  // ── 初始化内部 canvas ──
   useEffect(() => {
     if (!imageCanvasRef.current) {
       const ic = document.createElement("canvas");
@@ -138,335 +329,76 @@ export function ImageEditorCanvas({
       mc.height = image.height;
       maskRef.current = mc;
     }
+    if (!maskPreviewRef.current) {
+      const pc = document.createElement("canvas");
+      pc.width = image.width;
+      pc.height = image.height;
+      maskPreviewRef.current = pc;
+      maskDirtyRef.current = true;
+    }
     if (!overlayRef.current) {
       const oc = document.createElement("canvas");
       oc.width = image.width;
       oc.height = image.height;
       overlayRef.current = oc;
     }
+    scheduleRender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [image, onImageCanvasReady]);
 
-  // 计算显示尺寸
-  const getDisplaySize = useCallback(() => {
-    const maxW = 1200;
-    const maxH = 800;
-    const aspect = image.width / image.height;
-    let w = maxW;
-    let h = w / aspect;
-    if (h > maxH) {
-      h = maxH;
-      w = h * aspect;
-    }
-    return { w, h };
-  }, [image]);
-
-  // 主渲染
-  const render = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !imageCanvasRef.current) return;
-    const ctx = canvas.getContext("2d")!;
-    const { w, h } = getDisplaySize();
-    canvas.width = w;
-    canvas.height = h;
-
-    // 清空
-    ctx.clearRect(0, 0, w, h);
-
-    // 画布坐标 → 图像坐标 的变换
-    const scaleX = w / imageCanvasRef.current.width;
-    const scaleY = h / imageCanvasRef.current.height;
-    const scale = Math.min(scaleX, scaleY);
-
-    ctx.save();
-    // 居中
-    const offsetX = (w - imageCanvasRef.current.width * scale) / 2 + pan.x;
-    const offsetY = (h - imageCanvasRef.current.height * scale) / 2 + pan.y;
-
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(transform.flipX ? -scale : scale, transform.flipY ? -scale : scale);
-    if (transform.flipX) ctx.translate(imageCanvasRef.current.width, 0);
-    if (transform.flipY) ctx.translate(0, imageCanvasRef.current.height);
-    ctx.rotate((transform.rotation * Math.PI) / 180);
-    ctx.translate(-imageCanvasRef.current.width / 2, -imageCanvasRef.current.height / 2);
-    ctx.translate(imageCanvasRef.current.width / 2, imageCanvasRef.current.height / 2);
-
-    // 应用调整和滤镜
-    const filters: string[] = [];
-    if (adjustments.brightness !== 100) filters.push(`brightness(${adjustments.brightness}%)`);
-    if (adjustments.contrast !== 100) filters.push(`contrast(${adjustments.contrast}%)`);
-    if (adjustments.saturation !== 100) filters.push(`saturate(${adjustments.saturation}%)`);
-    if (adjustments.hue) filters.push(`hue-rotate(${adjustments.hue}deg)`);
-    if (adjustments.blur) filters.push(`blur(${adjustments.blur}px)`);
-    if (filters.length) ctx.filter = filters.join(" ");
-    else ctx.filter = "none";
-
-    ctx.drawImage(imageCanvasRef.current, 0, 0);
-
-    // 滤镜通过 CSS 滤镜无法在 drawImage 后叠加 —— 改用 filter 在 drawImage 前设置
-    // 实际上 filter 会影响 drawImage，所以上面的设置是对的
-
-    ctx.filter = "none";
-
-    // 绘制裁剪框
-    if (crop) {
-      const cx = crop.x * scale + offsetX;
-      const cy = crop.y * scale + offsetY;
-      const cw = crop.w * scale;
-      const ch = crop.h * scale;
-      ctx.save();
-      ctx.strokeStyle = "#35c9ff";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(cx, cy, cw, ch);
-      // 半透明遮罩
-      ctx.fillStyle = "rgba(0,0,0,0.4)";
-      ctx.fillRect(0, 0, cx, h);
-      ctx.fillRect(cx + cw, 0, w - cx - cw, h);
-      ctx.fillRect(cx, 0, cw, cy);
-      ctx.fillRect(cx, cy + ch, cw, h - cy - ch);
-      // 手柄
-      ctx.fillStyle = "#35c9ff";
-      const hs = 8;
-      const handles = [
-        [cx, cy], [cx + cw, cy], [cx, cy + ch], [cx + cw, cy + ch],
-        [cx + cw / 2, cy], [cx + cw / 2, cy + ch],
-        [cx, cy + ch / 2], [cx + cw, cy + ch / 2],
-      ];
-      for (const [hx, hy] of handles) {
-        ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
-      }
-      ctx.restore();
-    }
-
-    // 绘制 overlay 图层（文字、形状、画笔预览）
-    if (showOverlay && overlayRef.current) {
-      ctx.drawImage(overlayRef.current, 0, 0, w, h);
-    }
-
-    // 绘制 mask 预览（半透明叠加）
-    if (showMask && maskRef.current && maskRef.current.width > 0) {
-      ctx.save();
-      ctx.globalAlpha = 0.35;
-      // 将 mask 用彩色显示（红色 = 编辑区域）
-      const mc = document.createElement("canvas");
-      mc.width = maskRef.current.width;
-      mc.height = maskRef.current.height;
-      const mctx = mc.getContext("2d")!;
-      const maskData = maskRef.current.getContext("2d")!.getImageData(0, 0, maskRef.current.width, maskRef.current.height);
-      const out = mctx.createImageData(maskRef.current.width, maskRef.current.height);
-      for (let i = 0; i < maskData.data.length; i += 4) {
-        const v = maskData.data[i]; // mask 用 R 通道
-        out.data[i] = 255; // R
-        out.data[i + 1] = 0;
-        out.data[i + 2] = 0;
-        out.data[i + 3] = v; // 用 alpha 表示 mask 强度
-      }
-      mctx.putImageData(out, 0, 0);
-      ctx.drawImage(mc, 0, 0, w, h);
-      ctx.restore();
-    }
-
-    ctx.restore();
-  }, [
-    image,
-    transform,
-    crop,
-    pan,
-    adjustments,
-    brushColor,
-    brushSize,
-    textColor,
-    fontSize,
-    shapeType,
-    shapeColor,
-    textValue,
-    showOverlay,
-    showMask,
-    getDisplaySize,
-  ]);
-
-  // 重渲染
+  // ── 低频 props 变化时触发渲染 ──
+  // transform / adjustments 影响 base canvas，需要重新生成
   useEffect(() => {
-    render();
-  }, [render]);
+    baseDirtyRef.current = true;
+    scheduleRender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transform, adjustments]);
 
-  // 导出用 canvas
+  // crop / tool / overlay / mask 等只影响上层绘制，不重新生成 base
   useEffect(() => {
-    if (!imageCanvasRef.current) return;
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = imageCanvasRef.current.width;
-    exportCanvas.height = imageCanvasRef.current.height;
-    const ctx = exportCanvas.getContext("2d")!;
+    scheduleRender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crop, tool, showOverlay, showMask, textValue]);
 
-    // 应用调整
-    const filters: string[] = [];
-    if (adjustments.brightness !== 100) filters.push(`brightness(${adjustments.brightness}%)`);
-    if (adjustments.contrast !== 100) filters.push(`contrast(${adjustments.contrast}%)`);
-    if (adjustments.saturation !== 100) filters.push(`saturate(${adjustments.saturation}%)`);
-    if (adjustments.hue) filters.push(`hue-rotate(${adjustments.hue}deg)`);
-    if (adjustments.blur) filters.push(`blur(${adjustments.blur}px)`);
-    if (filters.length) ctx.filter = filters.join(" ");
-
-    ctx.drawImage(imageCanvasRef.current, 0, 0);
-    ctx.filter = "none";
-
-    // 裁剪
-    if (crop) {
-      const cropped = document.createElement("canvas");
-      cropped.width = crop.w;
-      cropped.height = crop.h;
-      const cctx = cropped.getContext("2d")!;
-      cctx.drawImage(exportCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
-      onExportCanvas(cropped);
-    } else {
-      onExportCanvas(exportCanvas);
+  // ── Mask 脏了就重新生成预览 ──
+  useEffect(() => {
+    if (maskDirtyRef.current) {
+      regenerateMaskPreview();
+      scheduleRender();
     }
-  }, [imageCanvasRef, adjustments, crop, onExportCanvas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regenerateMaskPreview]);
 
-  // 坐标转换：屏幕 → 图像
+  // ── 坐标转换：屏幕 → 图像 ──
   const screenToImage = useCallback(
     (sx: number, sy: number) => {
-      const { w, h } = getDisplaySize();
-      const scale = Math.min(w / image.width, h / image.height);
-      const offsetX = (w - image.width * scale) / 2 + pan.x;
-      const offsetY = (h - image.height * scale) / 2 + pan.y;
+      const p = propsRef.current;
+      if (!p) return { x: 0, y: 0 };
+      const canvas = canvasRef.current!;
+      const w = canvas.width;
+      const h = canvas.height;
+      const baseScale = Math.min(w / p.image.width, h / p.image.height);
+      const scale = baseScale * p.transform.scale;
+      const offsetX = (w - p.image.width * scale) / 2 + panRef.current.x;
+      const offsetY = (h - p.image.height * scale) / 2 + panRef.current.y;
       let ix = (sx - offsetX) / scale;
       let iy = (sy - offsetY) / scale;
-      // 翻转
-      if (transform.flipX) ix = image.width - ix;
-      if (transform.flipY) iy = image.height - iy;
-      // 旋转（简化：仅支持 0/90/180/270）
-      if (transform.rotation === 90) {
-        [ix, iy] = [image.height - iy, ix];
-      } else if (transform.rotation === 180) {
-        ix = image.width - ix;
-        iy = image.height - iy;
-      } else if (transform.rotation === 270) {
-        [ix, iy] = [iy, image.width - ix];
+      if (p.transform.flipX) ix = p.image.width - ix;
+      if (p.transform.flipY) iy = p.image.height - iy;
+      if (p.transform.rotation === 90) {
+        [ix, iy] = [p.image.height - iy, ix];
+      } else if (p.transform.rotation === 180) {
+        ix = p.image.width - ix;
+        iy = p.image.height - iy;
+      } else if (p.transform.rotation === 270) {
+        [ix, iy] = [iy, p.image.width - ix];
       }
       return { x: ix, y: iy };
     },
-    [image, getDisplaySize, pan, transform]
+    []
   );
 
-  // 鼠标事件
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const img = screenToImage(sx, sy);
-
-      if (tool === "crop") {
-        drawRef.current.drawing = true;
-        drawRef.current.startX = img.x;
-        drawRef.current.startY = img.y;
-        drawRef.current.lastX = img.x;
-        drawRef.current.lastY = img.y;
-        return;
-      }
-
-      if (tool === "brush" || tool === "eraser") {
-        drawRef.current.drawing = true;
-        drawRef.current.lastX = img.x;
-        drawRef.current.lastY = img.y;
-        drawMaskPoint(img.x, img.y, tool === "eraser");
-        return;
-      }
-
-      if (tool === "shape") {
-        drawRef.current.drawing = true;
-        drawRef.current.startX = img.x;
-        drawRef.current.startY = img.y;
-        return;
-      }
-
-      if (tool === "text") {
-        setTextInput({ x: img.x, y: img.y, value: "" });
-        return;
-      }
-
-      // select → pan
-      setPanning(true);
-    },
-    [tool, screenToImage]
-  );
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const img = screenToImage(sx, sy);
-
-      if (tool === "crop" && drawRef.current.drawing) {
-        const x = Math.min(drawRef.current.startX, img.x);
-        const y = Math.min(drawRef.current.startY, img.y);
-        const w = Math.abs(img.x - drawRef.current.startX);
-        const h = Math.abs(img.y - drawRef.current.startY);
-        setHoverCrop({ x, y, w, h });
-        return;
-      }
-
-      if ((tool === "brush" || tool === "eraser") && drawRef.current.drawing) {
-        drawMaskLine(drawRef.current.lastX, drawRef.current.lastY, img.x, img.y, tool === "eraser");
-        drawRef.current.lastX = img.x;
-        drawRef.current.lastY = img.y;
-        return;
-      }
-
-      if (tool === "shape" && drawRef.current.drawing) {
-        // 预览在 render 中通过 hoverCrop 临时显示
-        setHoverCrop({ x: Math.min(drawRef.current.startX, img.x), y: Math.min(drawRef.current.startY, img.y), w: Math.abs(img.x - drawRef.current.startX), h: Math.abs(img.y - drawRef.current.startY) });
-        return;
-      }
-
-      if (panning) {
-        setPan((p) => ({ x: p.x + (e.clientX - (rect.left + sx)), y: p.y + (e.clientY - (rect.top + sy)) }));
-      }
-    },
-    [tool, screenToImage, panning]
-  );
-
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const img = screenToImage(sx, sy);
-
-      if (tool === "crop" && drawRef.current.drawing) {
-        drawRef.current.drawing = false;
-        if (hoverCrop) {
-          onCropChange({ x: hoverCrop.x, y: hoverCrop.y, w: hoverCrop.w, h: hoverCrop.h });
-        }
-        setHoverCrop(null);
-        return;
-      }
-
-      if (tool === "shape" && drawRef.current.drawing) {
-        drawRef.current.drawing = false;
-        if (hoverCrop) {
-          commitShape(hoverCrop);
-        }
-        setHoverCrop(null);
-        return;
-      }
-
-      if (tool === "brush" || tool === "eraser") {
-        drawRef.current.drawing = false;
-        if (maskRef.current) {
-          onMaskChange(maskRef.current.toDataURL());
-        }
-        return;
-      }
-
-      setPanning(false);
-    },
-    [tool, hoverCrop, onCropChange, onMaskChange, screenToImage]
-  );
-
-  // mask 绘制
+  // ── Mask 绘制（直接写 maskCanvas，不触发 React） ──
   const drawMaskPoint = useCallback(
     (x: number, y: number, erase: boolean) => {
       const mc = maskRef.current;
@@ -475,10 +407,10 @@ export function ImageEditorCanvas({
       mctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
       mctx.fillStyle = erase ? "rgba(0,0,0,0)" : "rgba(255,255,255,1)";
       mctx.beginPath();
-      mctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+      mctx.arc(x, y, propsRef.current!.brushSize / 2, 0, Math.PI * 2);
       mctx.fill();
     },
-    [brushSize]
+    []
   );
 
   const drawMaskLine = useCallback(
@@ -488,7 +420,7 @@ export function ImageEditorCanvas({
       const mctx = mc.getContext("2d")!;
       mctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
       mctx.strokeStyle = erase ? "rgba(0,0,0,0)" : "rgba(255,255,255,1)";
-      mctx.lineWidth = brushSize;
+      mctx.lineWidth = propsRef.current!.brushSize;
       mctx.lineCap = "round";
       mctx.lineJoin = "round";
       mctx.beginPath();
@@ -496,30 +428,31 @@ export function ImageEditorCanvas({
       mctx.lineTo(x2, y2);
       mctx.stroke();
     },
-    [brushSize]
+    []
   );
 
-  // 提交形状到 overlay
+  // ── 提交形状到 overlay ──
   const commitShape = useCallback(
     (rect: { x: number; y: number; w: number; h: number }) => {
       const oc = overlayRef.current;
       if (!oc) return;
       const octx = oc.getContext("2d")!;
-      octx.strokeStyle = shapeColor;
-      octx.lineWidth = Math.max(2, fontSize / 12);
-      octx.fillStyle = shapeColor;
+      const p = propsRef.current!;
+      octx.strokeStyle = p.shapeColor;
+      octx.lineWidth = Math.max(2, p.fontSize / 12);
+      octx.fillStyle = p.shapeColor;
       octx.beginPath();
-      if (shapeType === "rect") {
+      if (p.shapeType === "rect") {
         octx.rect(rect.x, rect.y, rect.w, rect.h);
-      } else if (shapeType === "circle") {
+      } else if (p.shapeType === "circle") {
         const cx = rect.x + rect.w / 2;
         const cy = rect.y + rect.h / 2;
         const r = Math.max(rect.w, rect.h) / 2;
         octx.arc(cx, cy, r, 0, Math.PI * 2);
-      } else if (shapeType === "line") {
+      } else if (p.shapeType === "line") {
         octx.moveTo(rect.x, rect.y);
         octx.lineTo(rect.x + rect.w, rect.y + rect.h);
-      } else if (shapeType === "arrow") {
+      } else if (p.shapeType === "arrow") {
         const ax = rect.x + rect.w;
         const ay = rect.y + rect.h / 2;
         octx.moveTo(rect.x, rect.y + rect.h / 2);
@@ -533,61 +466,205 @@ export function ImageEditorCanvas({
       }
       octx.stroke();
     },
-    [shapeType, shapeColor, fontSize]
+    []
   );
 
-  // 文字提交
+  // ── 文字提交 ──
   useEffect(() => {
     if (textInput && textInput.value.trim()) {
       const oc = overlayRef.current;
       if (!oc) return;
       const octx = oc.getContext("2d")!;
-      octx.fillStyle = textColor;
-      octx.font = `${fontSize}px sans-serif`;
+      const p = propsRef.current!;
+      octx.fillStyle = p.textColor;
+      octx.font = `${p.fontSize}px sans-serif`;
       octx.fillText(textInput.value, textInput.x, textInput.y);
       setTextInput(null);
     }
-  }, [textInput, textColor, fontSize]);
-
-  // 键盘快捷键
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setTextInput(null);
-        setHoverCrop(null);
-      }
-      if (e.key === "Enter" && textInput) {
-        // 由上面的 useEffect 处理
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textInput]);
 
-  // 滤镜预览叠加
-  useEffect(() => {
-    if (!imageCanvasRef.current) return;
-    // 滤镜（grayscale/sepia/vintage 等）通过在 render 中叠加半透明层实现
-    // 这里不修改 imageCanvas，只在 render 中叠加
-  }, [filters]);
+  // ── Pointer 事件（完全脱离 React 高频更新） ──
 
-  // 滚轮缩放
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    onTransformChange({
-      ...transform,
-      scale: Math.max(0.3, Math.min(3, transform.scale * factor)),
-    });
+    const img = screenToImage(sx, sy);
+    const p = propsRef.current!;
+
+    if (p.tool === "crop") {
+      drawRef.current.drawing = true;
+      drawRef.current.startX = img.x;
+      drawRef.current.startY = img.y;
+      drawRef.current.lastX = img.x;
+      drawRef.current.lastY = img.y;
+      return;
+    }
+
+    if (p.tool === "brush" || p.tool === "eraser") {
+      drawRef.current.drawing = true;
+      drawRef.current.lastX = img.x;
+      drawRef.current.lastY = img.y;
+      drawMaskPoint(img.x, img.y, p.tool === "eraser");
+      maskDirtyRef.current = true;
+      scheduleRender();
+      return;
+    }
+
+    if (p.tool === "shape") {
+      drawRef.current.drawing = true;
+      drawRef.current.startX = img.x;
+      drawRef.current.startY = img.y;
+      drawRef.current.lastX = img.x;
+      drawRef.current.lastY = img.y;
+      return;
+    }
+
+    if (p.tool === "text") {
+      setTextInput({ x: img.x, y: img.y, value: "" });
+      return;
+    }
+
+    // select → pan（记录屏幕坐标用于计算 dx/dy）
+    drawRef.current.drawing = true;
+    drawRef.current.startX = e.clientX;
+    drawRef.current.startY = e.clientY;
   };
 
-  // 双击适应
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const p = propsRef.current!;
+
+    if (p.tool === "crop" && drawRef.current.drawing) {
+      const img = screenToImage(sx, sy);
+      drawRef.current.lastX = img.x;
+      drawRef.current.lastY = img.y;
+      scheduleRender();
+      return;
+    }
+
+    if ((p.tool === "brush" || p.tool === "eraser") && drawRef.current.drawing) {
+      const img = screenToImage(sx, sy);
+      drawMaskLine(drawRef.current.lastX, drawRef.current.lastY, img.x, img.y, p.tool === "eraser");
+      drawRef.current.lastX = img.x;
+      drawRef.current.lastY = img.y;
+      maskDirtyRef.current = true;
+      scheduleRender();
+      return;
+    }
+
+    if (p.tool === "shape" && drawRef.current.drawing) {
+      const img = screenToImage(sx, sy);
+      drawRef.current.lastX = img.x;
+      drawRef.current.lastY = img.y;
+      scheduleRender();
+      return;
+    }
+
+    // Pan：用 dx/dy 累加，不依赖 rect.left
+    if (drawRef.current.drawing && p.tool === "select") {
+      const dx = e.clientX - drawRef.current.startX;
+      const dy = e.clientY - drawRef.current.startY;
+      panRef.current.x += dx;
+      panRef.current.y += dy;
+      drawRef.current.startX = e.clientX;
+      drawRef.current.startY = e.clientY;
+      scheduleRender();
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = propsRef.current!;
+
+    if (p.tool === "crop" && drawRef.current.drawing) {
+      drawRef.current.drawing = false;
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const img = screenToImage(sx, sy);
+      const x = Math.min(drawRef.current.startX, img.x);
+      const y = Math.min(drawRef.current.startY, img.y);
+      const w = Math.abs(img.x - drawRef.current.startX);
+      const h = Math.abs(img.y - drawRef.current.startY);
+      if (w > 0 && h > 0) {
+        onCropChange({ x, y, w, h });
+      }
+      scheduleRender();
+      return;
+    }
+
+    if (p.tool === "shape" && drawRef.current.drawing) {
+      drawRef.current.drawing = false;
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const img = screenToImage(sx, sy);
+      const x = Math.min(drawRef.current.startX, img.x);
+      const y = Math.min(drawRef.current.startY, img.y);
+      const w = Math.abs(img.x - drawRef.current.startX);
+      const h = Math.abs(img.y - drawRef.current.startY);
+      if (w > 0 && h > 0) {
+        commitShape({ x, y, w, h });
+      }
+      scheduleRender();
+      return;
+    }
+
+    if (p.tool === "brush" || p.tool === "eraser") {
+      drawRef.current.drawing = false;
+      if (maskDirtyRef.current) {
+        regenerateMaskPreview();
+        if (maskRef.current) {
+          onMaskChange(maskRef.current.toDataURL());
+        }
+        maskDirtyRef.current = false;
+      }
+      return;
+    }
+
+    drawRef.current.drawing = false;
+  };
+
+  // ── 滚轮缩放（以鼠标位置为中心） ──
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const p = propsRef.current!;
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const oldScale = p.transform.scale;
+    const newScale = Math.max(0.25, Math.min(4, oldScale * factor));
+
+    // 以鼠标位置为中心缩放
+    // 必须用实际显示缩放 baseScale × transform.scale，不能只用 baseScale
+    const w = canvas.width;
+    const h = canvas.height;
+    const baseScale = Math.min(w / p.image.width, h / p.image.height);
+    const oldDisplayScale = baseScale * oldScale;
+    const offsetX = (w - p.image.width * oldDisplayScale) / 2 + panRef.current.x;
+    const offsetY = (h - p.image.height * oldDisplayScale) / 2 + panRef.current.y;
+    const imgX = (sx - offsetX) / oldDisplayScale;
+    const imgY = (sy - offsetY) / oldDisplayScale;
+
+    const newDisplayScale = baseScale * newScale;
+    const newOffsetX = sx - imgX * newDisplayScale;
+    const newOffsetY = sy - imgY * newDisplayScale;
+    panRef.current.x = newOffsetX - (w - p.image.width * newDisplayScale) / 2;
+    panRef.current.y = newOffsetY - (h - p.image.height * newDisplayScale) / 2;
+
+    onTransformChange({ ...p.transform, scale: newScale });
+  };
+
+  // ── 双击适应 ──
   const handleDoubleClick = () => {
     onTransformChange({ scale: 1, rotation: 0, flipX: false, flipY: false });
-    setPan({ x: 0, y: 0 });
+    panRef.current = { x: 0, y: 0 };
+    scheduleRender();
   };
 
   return (
@@ -601,10 +678,10 @@ export function ImageEditorCanvas({
         backgroundSize: "20px 20px",
         backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
       }}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={() => setPanning(false)}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
       onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
     />

@@ -86,13 +86,17 @@ export function ImageEditor({
   const [canRedo, setCanRedo] = useState(false);
   const [layers, setLayers] = useState<Layer[]>([]);
 
+  // 历史记录上限 — 超过即从头部丢弃，避免内存无限增长
+  const MAX_HISTORY = 20;
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const exportCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const originalImageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const compareRef = useRef<HTMLDivElement>(null);
+  const comparePosRef = useRef(50);
+  const rafCompareRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── 加载图片 ──
@@ -155,7 +159,13 @@ export function ImageEditor({
         overlayCanvas: overlayCanvasRef.current,
         maskCanvas: maskCanvasRef.current,
       });
-      setHistoryIdx(newH.length - 1);
+      // 限制历史记录数量 — 超过上限从头部丢弃
+      let newIdx = newH.length - 1;
+      if (newH.length > MAX_HISTORY) {
+        newH.shift();
+        newIdx = newH.length - 1;
+      }
+      setHistoryIdx(newIdx);
       setCanUndo(newH.length > 1);
       setCanRedo(false);
       return newH;
@@ -238,6 +248,11 @@ export function ImageEditor({
     applyFilterToCanvas();
   }, [applyFilterToCanvas]);
 
+  // 稳定的回调 — 避免每次父 render 都创建新函数 identity
+  const handleImageCanvasReady = useCallback((c: HTMLCanvasElement) => {
+    imageCanvasRef.current = c;
+  }, []);
+
   // ── AI 编辑 ──
   const handleAIGenerate = useCallback(
     async (params: {
@@ -318,8 +333,19 @@ export function ImageEditor({
   // ── 导出 ──
   const handleExport = useCallback(
     (format: "png" | "jpeg" | "webp") => {
-      const canvas = exportCanvasRef.current;
-      if (!canvas) return;
+      // 按需创建 export canvas — 不在每次 render 时重建
+      const canvas = document.createElement("canvas");
+      canvas.width = imageWidth;
+      canvas.height = imageHeight;
+      const ctx = canvas.getContext("2d")!;
+
+      if (imageCanvasRef.current) {
+        ctx.drawImage(imageCanvasRef.current, 0, 0);
+      }
+      if (overlayCanvasRef.current) {
+        ctx.drawImage(overlayCanvasRef.current, 0, 0);
+      }
+
       const mime = format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
       canvas.toBlob(
         (blob) => {
@@ -331,7 +357,7 @@ export function ImageEditor({
         format === "webp" ? 0.9 : 0.95
       );
     },
-    [onExport]
+    [imageWidth, imageHeight, onExport]
   );
 
   // ── 视图操作 ──
@@ -364,7 +390,14 @@ export function ImageEditor({
     if (!compareRef.current) return;
     const rect = compareRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    setComparePos(Math.max(0, Math.min(100, (x / rect.width) * 100)));
+    const pos = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    comparePosRef.current = pos;
+    // rAF 节流 — 鼠标移动期间不直接触发 React render
+    if (rafCompareRef.current) return;
+    rafCompareRef.current = requestAnimationFrame(() => {
+      rafCompareRef.current = null;
+      setComparePos(comparePosRef.current);
+    });
   };
 
   // ── 键盘快捷键 ──
@@ -460,10 +493,7 @@ export function ImageEditor({
           </button>
           <button
             type="button"
-            onClick={() => {
-              const url = exportCanvasRef.current?.toDataURL("image/png");
-              if (url) onExport(url, "png");
-            }}
+            onClick={() => handleExport("png")}
             className="flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs text-accent-ink hover:opacity-90"
           >
             <Download className="h-3.5 w-3.5" />
@@ -494,11 +524,11 @@ export function ImageEditor({
 
         {/* 中间画布区域 */}
         <div className="relative flex-1 overflow-auto" style={{ backgroundColor: "#111111" }}>
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div ref={compareRef} className="relative inline-block" style={{ maxWidth: "100%" }}>
-              {compareMode && compareResult ? (
-                // Before/After 对比
-                <div className="relative">
+          <div ref={compareRef} className="relative h-full w-full">
+            {compareMode && compareResult ? (
+              // Before/After 对比 — 居中显示
+              <div className="flex h-full items-center justify-center p-4">
+                <div className="relative" style={{ maxWidth: "100%" }}>
                   <img
                     src={imageSrc}
                     alt="before"
@@ -533,35 +563,30 @@ export function ImageEditor({
                     }}
                   />
                 </div>
-              ) : (
-                <ImageEditorCanvas
-                  image={htmlImage}
-                  transform={transform}
-                  onTransformChange={setTransform}
-                  crop={crop}
-                  tool={tool}
-                  brushColor={brushColor}
-                  brushSize={brushSize}
-                  textColor={textColor}
-                  fontSize={fontSize}
-                  shapeType={shapeType}
-                  shapeColor={shapeColor}
-                  adjustments={adjustments}
-                  filters={{}}
-                  textValue={textValue}
-                  showOverlay={showOverlay}
-                  showMask={showMask}
-                  onMaskChange={setMaskDataUrl}
-                  onCropChange={setCrop}
-                  onExportCanvas={(c) => {
-                    exportCanvasRef.current = c;
-                  }}
-                  onImageCanvasReady={(c) => {
-                    imageCanvasRef.current = c;
-                  }}
-                />
-              )}
-            </div>
+              </div>
+            ) : (
+              <ImageEditorCanvas
+                image={htmlImage}
+                transform={transform}
+                onTransformChange={setTransform}
+                crop={crop}
+                tool={tool}
+                brushColor={brushColor}
+                brushSize={brushSize}
+                textColor={textColor}
+                fontSize={fontSize}
+                shapeType={shapeType}
+                shapeColor={shapeColor}
+                adjustments={adjustments}
+                filters={{}}
+                textValue={textValue}
+                showOverlay={showOverlay}
+                showMask={showMask}
+                onMaskChange={setMaskDataUrl}
+                onCropChange={setCrop}
+                onImageCanvasReady={handleImageCanvasReady}
+              />
+            )}
           </div>
 
           {/* 缩放指示器 */}
@@ -591,16 +616,21 @@ export function ImageEditor({
                 type="button"
                 onClick={() => {
                   if (maskCanvasRef.current) {
-                    const ctx = maskCanvasRef.current.getContext("2d")!;
-                    const data = ctx.getImageData(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
-                    for (let i = 0; i < data.data.length; i += 4) {
-                      const v = 255 - data.data[i];
-                      data.data[i] = v;
-                      data.data[i + 1] = v;
-                      data.data[i + 2] = v;
-                    }
-                    ctx.putImageData(data, 0, 0);
-                    setMaskDataUrl(maskCanvasRef.current.toDataURL());
+                    const mc = maskCanvasRef.current;
+                    const ctx = mc.getContext("2d")!;
+                    // 用 globalCompositeOperation 反选 — GPU 加速，避免像素循环
+                    const temp = document.createElement("canvas");
+                    temp.width = mc.width;
+                    temp.height = mc.height;
+                    temp.getContext("2d")!.drawImage(mc, 0, 0);
+                    ctx.clearRect(0, 0, mc.width, mc.height);
+                    ctx.globalCompositeOperation = "source-over";
+                    ctx.fillStyle = "white";
+                    ctx.fillRect(0, 0, mc.width, mc.height);
+                    ctx.globalCompositeOperation = "destination-out";
+                    ctx.drawImage(temp, 0, 0);
+                    ctx.globalCompositeOperation = "source-over";
+                    setMaskDataUrl(mc.toDataURL());
                     saveHistory();
                   }
                 }}

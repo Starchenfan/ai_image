@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { memo } from "react";
 import {
   Download,
   Image as ImageIcon,
@@ -110,7 +111,7 @@ interface Props {
   onCropAspectRatioChange: (r: string) => void;
 }
 
-export function ImageEditorPropsPanel({
+export const ImageEditorPropsPanel = memo(function ImageEditorPropsPanel({
   models,
   services,
   selectedServiceId,
@@ -503,7 +504,7 @@ export function ImageEditorPropsPanel({
       </div>
     </div>
   );
-}
+});
 
 // ── 子组件 ──
 
