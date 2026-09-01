@@ -15,7 +15,7 @@ import {
   ClipboardCopy,
   ImagePlus,
 } from "lucide-react";
-import type { HistoryItem, GenerateTask, GeneratedImage } from "@/lib/types";
+import type { HistoryItem, GenerateTask, GeneratedImage, AiModel, AiService } from "@/lib/types";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,6 +103,10 @@ function toTask(h: HistoryItem): GenerateTask {
       seed: h.seed ?? -1,
       parameters: h.parameters,
     },
+    // 版本树画布用 model.displayName / service.name 渲染节点标签。
+    // 历史表只存展示名，这里补成最小对象，避免节点显示 "Unknown"。
+    model: { displayName: h.modelName } as unknown as AiModel,
+    service: { name: h.serviceName } as unknown as AiService,
     images: h.images,
     costCredits: h.costCredits,
     durationMs: h.durationMs,

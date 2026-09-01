@@ -39,8 +39,11 @@ export const VersionTreeNode = memo(function VersionTreeNode({ data, selected }:
     <div
       data-version-tree-node
       className={cn(
-        "relative overflow-visible rounded-lg border bg-paper-2 shadow-xl",
-        selected ? "border-accent shadow-accent/30" : "border-line"
+        "relative overflow-visible rounded-lg border bg-paper-2 shadow-xl transition-all duration-200",
+        "hover:shadow-2xl hover:-translate-y-0.5",
+        selected
+          ? "border-accent shadow-[0_0_0_1px_var(--color-accent),0_8px_30px_rgba(35,209,255,0.25)]"
+          : "border-line hover:border-paper-4 hover:shadow-[0_8px_30px_rgba(10,25,79,0.15)]"
       )}
       style={{ width, height }}
     >
@@ -125,12 +128,12 @@ export const VersionTreeNode = memo(function VersionTreeNode({ data, selected }:
           <button
             type="button"
             data-tree-branch
-            className="nodrag nopan pointer-events-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink transition-transform hover:scale-105"
+            className="nodrag nopan pointer-events-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink transition-all hover:scale-110 hover:shadow-[0_0_12px_rgba(35,209,255,0.5)]"
             onClick={() => actions.current.openBranch(item.id)}
             title="在该节点上二次创作"
             aria-label="在该节点上二次创作"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" />
           </button>
         )}
       </div>

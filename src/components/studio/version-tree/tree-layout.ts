@@ -3,8 +3,8 @@ import type { VersionTreeItem } from "./types";
 
 export const MAX_NODE_WIDTH = 240;
 export const MAX_NODE_HEIGHT = 320;
-export const HORIZONTAL_GAP = 100;
-export const VERTICAL_GAP = 56;
+export const HORIZONTAL_GAP = 80;
+export const VERTICAL_GAP = 40;
 
 export function imageNodeSize(image: Pick<GeneratedImage, "width" | "height">) {
   const aspectRatio = image.width > 0 && image.height > 0 ? image.width / image.height : 1;
@@ -82,7 +82,17 @@ export function buildTreeFromHistory(
   let ancestorId: string | null = selectedImageId;
   while (ancestorId && !connected.has(ancestorId)) {
     connected.add(ancestorId);
-    ancestorId = byId.get(ancestorId)?.parentId ?? null;
+    const parentId = byId.get(ancestorId)?.parentId ?? null;
+    // 把父节点的所有子节点（即当前节点的兄弟）也纳入，否则从子分支
+    // 进入画布时只显示一条链路，父节点的其它分支全部丢失。
+    if (parentId) {
+      for (const item of all) {
+        if (item.parentId === parentId && !connected.has(item.id)) {
+          connected.add(item.id);
+        }
+      }
+    }
+    ancestorId = parentId;
   }
 
   const queue = [selectedImageId];

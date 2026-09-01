@@ -218,8 +218,13 @@ class OpenAICompatAdapter implements ImageProvider {
         lastDetail = await res.text().catch(() => "");
         if (!TRANSIENT.has(res.status) || attempt === MAX_ATTEMPTS) break;
       } catch (e) {
-        if (attempt === MAX_ATTEMPTS)
-          throw new Error(`${serviceName} 网络错误: ${(e as Error).message}`);
+        if (attempt === MAX_ATTEMPTS) {
+          const err = e as Error & { cause?: unknown };
+          const cause = err.cause
+            ? ` cause=${err.cause instanceof Error ? err.cause.message : String(err.cause)}`
+            : "";
+          throw new Error(`${serviceName} 网络错误: ${err.message}${cause}`);
+        }
       }
       await delay(800 * attempt); // 退避间隔：0.8s、1.6s
     }

@@ -368,15 +368,16 @@ function VersionTreeInner({ task, image, onClose, onStarted }: VersionTreeProps)
           focusable: false,
           style: {
             stroke: "var(--color-ink-3)",
-            strokeWidth: 2,
-            opacity: 0.85,
-            strokeDasharray: "5 4",
+            strokeWidth: 1.5,
+            opacity: 0.7,
+            strokeDasharray: "6 5",
+            filter: "drop-shadow(0 1px 3px rgba(10,25,79,0.12))",
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: "var(--color-ink-3)",
-            width: 16,
-            height: 16,
+            width: 12,
+            height: 12,
           },
         }));
     },
@@ -534,7 +535,14 @@ function VersionTreeInner({ task, image, onClose, onStarted }: VersionTreeProps)
         </div>
       </div>
 
-      <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden">
+      <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden bg-paper-3">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.5]"
+          style={{
+            backgroundImage: "radial-gradient(circle, var(--color-ink-3) 1px, transparent 1px)",
+            backgroundSize: "22px 22px",
+          }}
+        />
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
@@ -545,7 +553,7 @@ function VersionTreeInner({ task, image, onClose, onStarted }: VersionTreeProps)
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-          className="bg-paper-3"
+          className="bg-transparent"
           proOptions={{ hideAttribution: true }}
         />
         {branchPanelPosition && (
