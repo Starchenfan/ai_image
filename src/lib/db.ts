@@ -53,15 +53,15 @@ const STEPFUN_SERVICE_ID = "svc-stepfun";
 const STEPFUN_MODEL_EDIT_ID = "mdl-step-image-edit-2";
 const STEPFUN_MODEL_LARGE_ID = "mdl-step-2x-large";
 /** Step API Key，仅服务端持有，不会序列化到客户端。 */
-const STEP_API_KEY = "1knsLeeiIHpEPHDbOcVYTg3mbK8s3xwwzsnYRCLJplYPd7z4uycWrSJ3zqdtLhswG";
+const STEP_API_KEY = process.env.STEP_API_KEY?.trim() ?? "";
 /** Aixoras —— 位于 api.aixoras.com 的 OpenAI 兼容图像 API，默认模型 gpt-image-2。 */
 const AIXORAS_SERVICE_ID = "svc-aixoras";
 const AIXORAS_MODEL_ID = "mdl-gpt-image-2";
 /** Aixoras API Key，仅服务端持有，不会序列化到客户端。 */
-const AIXORAS_API_KEY = "sk-zM6AdAYdnbcmv82Q7H4JPLMeEOtIBy9ydtYIe4fOsDcmBpQD";
+const AIXORAS_API_KEY = process.env.AIXORAS_API_KEY?.trim() ?? "";
 /** 默认厂商密钥，仅存储在服务端密钥库中。 */
-const DEFAULT_API_KEY = "sk_tr_mxz2CZTLl2iLv0yn624bg2LONrtXbENj6oj_LRGbYg4";
-const SENSENOVA_API_KEY = "sk-1k6cNNMHLkczOyYIApMpm4F3s7Atxxfa";
+const DEFAULT_API_KEY = process.env.DEFAULT_API_KEY?.trim() ?? "";
+const SENSENOVA_API_KEY = process.env.SENSENOVA_API_KEY?.trim() ?? "";
 
 /**
  * 种子数据放在模块作用域，而不是一次性 if 里——这样热重载（在同一 Node 进程中
@@ -73,8 +73,8 @@ const seedServices: AiService[] = [
     name: "基元律动",
     adapterType: "openai",
     baseUrl: "https://tokenrhythm.studio/v1",
-    apiKeyMasked: maskKey(DEFAULT_API_KEY),
-    status: "online",
+    apiKeyMasked: DEFAULT_API_KEY ? maskKey(DEFAULT_API_KEY) : "未配置",
+    status: DEFAULT_API_KEY ? "online" : "offline",
     latencyMs: 4000,
     recommended: true,
     tags: ["默认", "国风"],
@@ -85,8 +85,8 @@ const seedServices: AiService[] = [
     name: "商汤日日新",
     adapterType: "openai",
     baseUrl: "https://token.sensenova.cn/v1",
-    apiKeyMasked: maskKey(SENSENOVA_API_KEY),
-    status: "online",
+    apiKeyMasked: SENSENOVA_API_KEY ? maskKey(SENSENOVA_API_KEY) : "未配置",
+    status: SENSENOVA_API_KEY ? "online" : "offline",
     latencyMs: 75000,
     recommended: true,
     tags: ["高分辨率", "二次元"],
@@ -97,7 +97,7 @@ const seedServices: AiService[] = [
     name: "阶跃星辰",
     adapterType: "openai",
     baseUrl: "https://api.stepfun.com/v1",
-    apiKeyMasked: maskKey(STEP_API_KEY),
+    apiKeyMasked: STEP_API_KEY ? maskKey(STEP_API_KEY) : "未配置",
     status: STEP_API_KEY ? "online" : "offline",
     latencyMs: 30000,
     recommended: true,
@@ -391,7 +391,7 @@ for (const model of seedModels) {
   }
 }
 for (const [serviceId, key] of seedApiKeys) {
-  if (!g.__studioStore.apiKeys.has(serviceId)) {
+  if (key && !g.__studioStore.apiKeys.has(serviceId)) {
     g.__studioStore.apiKeys.set(serviceId, key);
   }
 }

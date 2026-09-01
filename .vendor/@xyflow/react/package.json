@@ -1,0 +1,13 @@
+{
+  "name": "@xyflow/react",
+  "version": "12.11.5",
+  "source": "src/index.ts",
+  "module": "dist/esm/index.js",
+  "main": "dist/umd/index.js",
+  "types": "dist/esm/index.d.ts",
+  "dependencies": {
+    "@xyflow/system": "*",
+    "classcat": "^5.0.3",
+    "zustand": "^4.4.0"
+  }
+}

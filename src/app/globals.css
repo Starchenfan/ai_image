@@ -72,3 +72,9 @@
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* 版本树画布 —— 节点拖拽/画布平移时把节点提升到合成层，
+   避免大面积 box-shadow + 圆角裁切在每帧 transform 时触发重绘。 */
+.react-flow__node:has([data-version-tree-node]) {
+  will-change: transform;
+}

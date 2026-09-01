@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { AdminLogoutButton } from "@/components/admin-logout-button";
 import {
   Dialog,
   DialogContent,
@@ -123,6 +124,7 @@ export default function AdminPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <AdminLogoutButton />
           <Button onClick={() => setImporting(true)} size="sm" variant="secondary">
             <Import className="h-4 w-4" />
             导入 NewAPI
@@ -483,7 +485,7 @@ function ImportNewApiDialog({
   /**
    * probe — Step 1 的动作：连接中转站并拉取模型列表。
    *
-   * 角色：它是「后端可达性」的唯一探测器。GET /api/admin/import/newapi
+   * 角色：它是「后端可达性」的唯一探测器。PUT /api/admin/import/newapi
    * 把 baseUrl+apiKey 透传给后端，由后端真正去请求中转站的 /models 端点，
    * 前端不直接跨域接触中转站。返回的 likelyImage 是按模型 id 命名的启发式判断
    * （中转站本身不区分图像/对话模型），所以只是「建议」，用户仍需按需勾选。
@@ -494,11 +496,11 @@ function ImportNewApiDialog({
     setProbing(true);
     setProbeError(null);
     try {
-      const r = await fetch(
-        `/api/admin/import/newapi?baseUrl=${encodeURIComponent(
-          baseUrl
-        )}&apiKey=${encodeURIComponent(apiKey)}`
-      );
+      const r = await fetch("/api/admin/import/newapi", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl, apiKey }),
+      });
       const data = (await r.json()) as ProbeResult & { error?: string };
       if (!r.ok) {
         setProbeError(data.error || `中转站返回 ${r.status}`);

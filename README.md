@@ -126,10 +126,15 @@ studio/
 
 ## 安全注意事项
 
-- 不要把真实 API Key 提交到 Git 仓库。
+- 不要把真实 API Key 提交到 Git 仓库。种子服务的 Key 通过
+  `STEP_API_KEY`、`AIXORAS_API_KEY`、`DEFAULT_API_KEY` 和
+  `SENSENOVA_API_KEY` 环境变量注入。
+- `/admin`、`/api/admin/*` 和 Credits 修改接口受管理员登录保护。
+  首次部署时必须配置 `ADMIN_PASSWORD` 和随机的
+  `ADMIN_SESSION_SECRET`；浏览器登录会话默认保持 30 天。
 - 正式环境应通过环境变量或密钥管理服务注入凭据。
 - 发布项目前应检查服务端种子数据，移除任何硬编码凭据。
-- 管理接口目前没有身份认证，部署到公网前必须增加访问控制。
+- 管理员密码和会话密钥不能使用 `.env.example` 中的占位值。
 
 ## MySQL 图片持久化
 

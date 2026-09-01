@@ -1,4 +1,3 @@
-import sharp from "sharp";
 import type { GeneratedImage } from "./types";
 
 /** 将 data URL 解析为 { mimeType, data }。MySQL 后端与本地后端共用同一实现。 */
@@ -43,7 +42,10 @@ export async function optimizeImageForStorage(data: Buffer, mimeType: string) {
   }
 
   try {
-    const optimized = await sharp(data, { animated: false })
+    // sharp 是重型原生模块，fork/jest-worker 子进程加载它时偶发崩溃。
+    // 用动态 import 把它推迟到真正调用时才载入，避免污染 worker 进程。
+    const sharpMod = (await import("sharp")).default;
+    const optimized = await sharpMod(data, { animated: false })
       .rotate()
       .webp({
         quality: imageStorageQuality(),

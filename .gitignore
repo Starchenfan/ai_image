@@ -5,6 +5,7 @@
 /.next/
 /.next-probe/
 /.next.conflict-*/
+/.next-analysis/
 /out/
 
 # Production output
@@ -39,6 +40,14 @@ pnpm-debug.log*
 /.run/
 /.workbuddy/
 /.studio/
+
+# Vendored dependencies (.vendor/) — keep runtime + types, ignore build artifacts
+/.vendor/**/*.d.ts.map
+/.vendor/**/*.bak*
+/.vendor/@xyflow/*/src/
+/.vendor/**/rollup.config.js
+/.vendor/**/postcss.config.js
+/.vendor/**/tsconfig.json
 
 # Editors and operating systems
 /.idea/

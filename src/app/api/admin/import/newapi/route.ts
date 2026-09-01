@@ -28,11 +28,27 @@ function cleanBaseUrl(raw: string): string {
   return raw.trim().replace(/[`'"　\s]+/g, "").replace(/\/+$/, "");
 }
 
-// GET /api/admin/import/newapi?baseUrl=...&apiKey=...
+// GET is retained for compatibility with older local tooling. The admin UI
+// uses PUT so credentials stay in the request body instead of the URL.
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const baseUrl = cleanBaseUrl(url.searchParams.get("baseUrl") || "");
-  const apiKey = (url.searchParams.get("apiKey") || "").trim();
+  return probeRelay(
+    url.searchParams.get("baseUrl") || "",
+    url.searchParams.get("apiKey") || ""
+  );
+}
+
+export async function PUT(req: Request) {
+  const body = (await req.json().catch(() => null)) as {
+    baseUrl?: string;
+    apiKey?: string;
+  } | null;
+  return probeRelay(body?.baseUrl || "", body?.apiKey || "");
+}
+
+async function probeRelay(rawBaseUrl: string, rawApiKey: string) {
+  const baseUrl = cleanBaseUrl(rawBaseUrl);
+  const apiKey = rawApiKey.trim();
 
   if (!baseUrl) {
     return NextResponse.json({ error: "baseUrl 必填" }, { status: 400 });

@@ -147,7 +147,8 @@ interface ImageProvider {
 **加一个新中转 = 三步, 不动前端:**
 1. 在 `db.ts` 加服务常量 + `seedServices` 条目 (adapterType 一般选 `openai`)
 2. 加 `seedModels` 条目: `modelId` (上游真名) + `capabilities` + `parameters` schema
-3. 加 `seedApiKeys` 条目 (真实 key 只进服务端 vault), `.env.local` 的 `NO_PROXY` 补域名
+3. 在 `.env.local` 配置对应的服务端环境变量，并把它加入 `seedApiKeys`
+   映射 (真实 key 只进服务端 vault), `NO_PROXY` 补域名
 
 `OpenAICompatAdapter` 关键行为:
 - **schema 驱动发参**: 只发 `model.parameters` 里声明过的 key。严格中转
@@ -173,7 +174,8 @@ admin 的修改。热重载 (HMR) 重跑模块时不会丢状态。
 
 ### 5.2 服务端 key vault
 
-`db.apiKeys: Map<serviceId, string>` —— 真实 key **只在这一个进程内存 Map 里**。
+`db.apiKeys: Map<serviceId, string>` —— 真实 key 从服务端环境变量加载后，
+**只进入这个进程内存 Map**。
 `AiService.apiKeyMasked` 是 `前3-后4` 脱敏值 (`mask.ts`), 序列化到客户端。
 `/api/generate` 和 `/api/generate/[id]/retry` 从 vault 注入 key,
 请求体里的 key 从不来自客户端。
@@ -237,6 +239,9 @@ opacity 修饰符 (裸 `var()` 加 opacity 会变透明)。
 | `IMAGE_STORAGE_WEBP_QUALITY` | 存储 WebP 质量 (默认 90), GIF/SVG 不转 |
 | `HTTP_PROXY` / `HTTPS_PROXY` | 服务器端出站代理 (undici) |
 | `NO_PROXY` | 直连 hosts 白名单, 逗号分隔 |
+| `*_API_KEY` | 四个种子图像服务的服务端凭据 |
+| `ADMIN_PASSWORD` | 管理后台登录密码 |
+| `ADMIN_SESSION_SECRET` | 管理会话 HMAC 签名密钥 |
 
 `.env.local` 当前 `NO_PROXY` 已含 `localhost,127.0.0.1,tokenrhythm.studio,
 api.stepfun.com,stepfun.com,token.sensenova.cn,sensenova.cn,api.aixoras.com,
@@ -259,7 +264,8 @@ aixoras.com` —— 这些直连不走代理。
   重启回到 seed (admin 后加的会丢)。
 - **任务队列**: 进程内 async, 不适合多实例。注释写明生产换 BullMQ。
 - **非 openai 适配器**: flux/sd/custom/proxy 仍生成占位图, 无真实实现。
-- **管理接口无认证**: 公网部署前必须加访问控制。
+- **管理认证**: `/admin`、`/api/admin/*` 和 Credits 写操作使用 30 天签名
+  Cookie 会话；生产环境必须设置独立的强密码与随机签名密钥。
 - **Aixoras 是中转**: 结果与 OpenAI 官网不一致 (后端/默认参数/seed 策略不同),
   不能当官方替代品。
 - **`/api/polish` 硬编码 `POLISH_MODEL = "glm-5.2"`**: 换中转会坏, 应从服务/模型动态取。

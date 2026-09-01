@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStudio } from "@/lib/store";
-import { TreeCanvas } from "@/components/studio/tree-canvas";
+import { VersionTree } from "@/components/studio/version-tree/version-tree";
 import { Portal } from "@/components/ui/portal";
 
 type Filter = "all" | "today" | "favorite";
@@ -77,9 +77,9 @@ function downloadName(h: HistoryItem, url: string) {
 }
 
 /**
- * toTask — 把历史记录还原成 TreeCanvas 需要的 GenerateTask 形态。
+ * toTask — 把历史记录还原成 VersionTree 需要的 GenerateTask 形态。
  *
- * 为什么需要它：TreeCanvas 的分支提交走 /api/tasks/[id]/branch，
+ * 为什么需要它：VersionTree 的分支提交走 /api/tasks/[id]/branch，
  * 后端 resolveParentTask 已经支持从 MySQL 还原历史记录当父任务；
  * 但画布自身需要 task.request.prompt / task.model / task.service
  * 来渲染节点标签，这些字段 HistoryItem 不直接提供，所以在这里补全。
@@ -138,7 +138,7 @@ export default function HistoryPage() {
   const applyHistoryItem = useStudio((s) => s.applyHistoryItem);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // 二次创作：用户在历史卡片上点「二次创作」时，记下选中的父任务与父图，
-  // 弹出全屏树状画布（TreeCanvas），和工作台主页的分支流程共用同一组件。
+  // 弹出全屏树状画布（VersionTree），和工作台主页的分支流程共用同一组件。
   const [branchTarget, setBranchTarget] = useState<{
     task: GenerateTask;
     image: GeneratedImage;
@@ -162,7 +162,7 @@ export default function HistoryPage() {
    *
    * 和 reuse 不同：reuse 是把参数填回工作台重新生成（消耗 token），
    * branch 是直接在原图基础上改 prompt / 取变体 / 图生图，产出带版本树链路的子任务。
-   * 卡片展示的是首图，所以默认基于 h.images[0] 分支；分支提交由 TreeCanvas 内部完成。
+   * 卡片展示的是首图，所以默认基于 h.images[0] 分支；分支提交由 VersionTree 内部完成。
    */
   const branch = (h: HistoryItem) => {
     const img = h.images[0];
@@ -425,7 +425,7 @@ export default function HistoryPage() {
 
     {branchTarget && (
       <Portal>
-        <TreeCanvas
+        <VersionTree
           task={branchTarget.task}
           image={branchTarget.image}
           onClose={() => setBranchTarget(null)}

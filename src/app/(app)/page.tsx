@@ -14,7 +14,7 @@ import { ReferenceImageUpload } from "@/components/studio/reference-image";
 import { GenerateButton } from "@/components/studio/generate-button";
 import { TaskStatus } from "@/components/studio/task-status";
 import { ResultGrid } from "@/components/studio/result-grid";
-import { TreeCanvas } from "@/components/studio/tree-canvas";
+import { VersionTree } from "@/components/studio/version-tree/version-tree";
 import { Portal } from "@/components/ui/portal";
 import { CompareBoard, type CompareEntry } from "@/components/studio/compare-board";
 import type { AiModel, GenerateTask, GeneratedImage } from "@/lib/types";
@@ -183,13 +183,13 @@ export default function StudioPage() {
   /**
    * handleBranchStarted — 分支任务提交成功。
    *
-   * 全屏树状画布（TreeCanvas）自己管理分支提交与轮询：提交后画布保持打开，
+   * 全屏树状画布（VersionTree）自己管理分支提交与轮询：提交后画布保持打开，
    * 新节点以 pending 态出现，2s 轮询到完成再换成真实图片，整棵树在画布上长出来。
    * 这里不关闭画布、也不切底层画布状态——onStarted 只是通知「分支已创建」，
    * 画布自己会推进。用户点 Esc / 关闭按钮时才回到右侧画布。
    */
   const handleBranchStarted = (_taskId: string) => {
-    // no-op: TreeCanvas handles its own polling and node lifecycle.
+    // no-op: VersionTree handles its own polling and node lifecycle.
   };
 
   /**
@@ -298,7 +298,7 @@ export default function StudioPage() {
         )}
         {branchTarget && (
           <Portal>
-            <TreeCanvas
+            <VersionTree
               task={branchTarget.task}
               image={branchTarget.image}
               onClose={() => setBranchTarget(null)}
