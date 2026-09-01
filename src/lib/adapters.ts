@@ -11,6 +11,8 @@ import type {
   ProviderTaskStatus,
   GeneratedImage,
   AdapterType,
+  ImageEditRequest,
+  ImageEditResult,
 } from "./types";
 import { placeholderDataUri } from "./seed";
 import { uid } from "./cn";
@@ -31,6 +33,12 @@ function parseSize(size: string, heightFirst = false): [number, number] {
 
 async function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 把 data URL 转成 Blob，供 multipart/form-data 上传。 */
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
 }
 
 /**
@@ -187,6 +195,101 @@ class OpenAICompatAdapter implements ImageProvider {
     }
   }
 
+  /**
+   * AI 图片编辑 —— 走 OpenAI 兼容的 /images/edits 契约。
+   *
+   * 支持 inpaint（传 mask）与无 mask 的 remove/add/replace/background 等操作。
+   * mask 为黑白 PNG data URL：白色区域 = 编辑区域，黑色 = 保留区域。
+   * 扩图（outpaint）通过 size 参数控制目标尺寸，超分（upscale）走 2x/4x。
+   *
+   * 无真实 Key 时退化为 mock，保证编辑器在开发演示环境下仍可端到端跑通。
+   */
+  async editImage(params: ImageEditRequest): Promise<ImageEditResult[]> {
+    const { service, model, prompt, apiKey } = params;
+
+    // 无真实 Key → mock
+    if (!apiKey) {
+      return this.mockEditImage(params);
+    }
+
+    if (!service || !model) {
+      throw new Error(`${params.serviceId} 对应的服务/模型未解析，无法执行编辑`);
+    }
+
+    // images/edits 契约要求 multipart/form-data（图片作为文件上传），
+    // 而不是 JSON——直接发 JSON 会被严格中转站以 400 拒绝。
+    const form = new FormData();
+    form.append("model", model.modelId);
+    form.append("prompt", prompt);
+    form.append("n", "1");
+
+    // 图片：data URL → Blob
+    const imageBlob = await dataUrlToBlob(params.image);
+    form.append("image", imageBlob, "image.png");
+
+    // mask —— 仅 inpaint / remove / add / replace 需要
+    if (params.mask) {
+      const maskBlob = await dataUrlToBlob(params.mask);
+      form.append("mask", maskBlob, "mask.png");
+    }
+
+    // size —— outpaint / upscale 时指定目标尺寸
+    if (params.size) {
+      form.append("size", params.size);
+    }
+
+    const url = `${service.baseUrl.replace(/\/$/, "")}/images/edits`;
+    let data: { data?: Array<{ url?: string; b64_json?: string }> };
+    try {
+      data = await this.postMultipart(url, form, apiKey, service.name);
+    } catch (e) {
+      throw new Error(`${service.name} 图片编辑失败: ${(e as Error).message}`);
+    }
+
+    return this.toEditResult(data, params);
+  }
+
+  /** mock 版 editImage —— 返回确定性占位图，用于无真实 Key 的开发演示。 */
+  private async mockEditImage(params: ImageEditRequest): Promise<ImageEditResult[]> {
+    const { operation, width = 1024, height = 1024 } = params;
+    // 根据操作类型生成不同色调的占位图，方便肉眼区分
+    const hue = operation === "inpaint" ? 280
+      : operation === "remove" ? 0
+      : operation === "add" ? 120
+      : operation === "replace" ? 200
+      : operation === "background" ? 180
+      : operation === "outpaint" ? 240
+      : operation === "restore" ? 30
+      : 45; // upscale
+    const url = placeholderDataUri(width, height, hue);
+    // 模拟网络延迟
+    await delay(2000 + Math.random() * 2000);
+    return [{
+      url,
+      width,
+      height,
+      index: 0,
+    }];
+  }
+
+  /** 把 /images/edits 的原始响应转成 ImageEditResult[]。 */
+  private toEditResult(
+    data: { data?: Array<{ url?: string; b64_json?: string }> },
+    params: ImageEditRequest
+  ): ImageEditResult[] {
+    const { width = 1024, height = 1024 } = params;
+    return (data.data ?? []).map((d, i) => ({
+      url: d.url ?? (d.b64_json
+        ? d.b64_json.startsWith("data:")
+          ? d.b64_json
+          : `data:image/png;base64,${d.b64_json}`
+        : placeholderDataUri(width, height, 0)),
+      width,
+      height,
+      index: i,
+    }));
+  }
+
   private async postJson(
     url: string,
     body: Record<string, unknown>,
@@ -227,6 +330,57 @@ class OpenAICompatAdapter implements ImageProvider {
         }
       }
       await delay(800 * attempt); // 退避间隔：0.8s、1.6s
+    }
+
+    if (!res || !res.ok) {
+      throw new Error(
+        `${serviceName} 返回 ${res?.status ?? "网络错误"}: ${lastDetail.slice(0, 300) || res?.statusText || "无响应"}`
+      );
+    }
+    return (await res.json()) as { data?: Array<{ url?: string; b64_json?: string }> };
+  }
+
+  /**
+   * postMultipart — 用 multipart/form-data 发 POST（图片编辑用）。
+   *
+   * 和 postJson 的区别：images/edits 契约要求图片以文件形式上传，
+   * JSON body 会被严格中转站拒绝。重试策略与 postJson 一致。
+   */
+  private async postMultipart(
+    url: string,
+    form: FormData,
+    apiKey: string,
+    serviceName: string
+  ): Promise<{ data?: Array<{ url?: string; b64_json?: string }> }> {
+    const TRANSIENT = new Set([429, 500, 502, 503, 504, 524]);
+    const MAX_ATTEMPTS = 3;
+    let res: Response | null = null;
+    let lastDetail = "";
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const signal = AbortSignal.timeout(90_000);
+        res = await fetch(url, {
+          method: "POST",
+          headers: {
+            Accept: "*/*",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: form,
+          signal,
+        });
+        if (res.ok) break;
+        lastDetail = await res.text().catch(() => "");
+        if (!TRANSIENT.has(res.status) || attempt === MAX_ATTEMPTS) break;
+      } catch (e) {
+        if (attempt === MAX_ATTEMPTS) {
+          const err = e as Error & { cause?: unknown };
+          const cause = err.cause
+            ? ` cause=${err.cause instanceof Error ? err.cause.message : String(err.cause)}`
+            : "";
+          throw new Error(`${serviceName} 网络错误: ${err.message}${cause}`);
+        }
+      }
+      await delay(800 * attempt);
     }
 
     if (!res || !res.ok) {

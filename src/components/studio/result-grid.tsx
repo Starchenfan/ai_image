@@ -9,6 +9,7 @@ import {
   Copy,
   Trash2,
   ImagePlus,
+  Edit3,
 } from "lucide-react";
 import type { GeneratedImage, GenerateTask } from "@/lib/types";
 import { cn } from "@/lib/cn";
@@ -33,11 +34,14 @@ import { Portal } from "@/components/ui/portal";
 export function ResultGrid({
   task,
   onBranch,
+  onEdit,
   onRemove,
 }: {
   task: GenerateTask;
   /** 点击「二次创作」时的回调，由父页面决定如何处理（弹面板 / 跳转）。 */
   onBranch?: (task: GenerateTask, image: GeneratedImage) => void;
+  /** 点击「编辑图片」时的回调，打开全屏图片编辑器。 */
+  onEdit?: (task: GenerateTask, image: GeneratedImage) => void;
   /** 点击「删除」时的回调，由父页面负责清理历史与任务。 */
   onRemove?: (taskId: string) => void;
 }) {
@@ -165,6 +169,18 @@ export function ResultGrid({
               >
                 <ImagePlus className="h-3.5 w-3.5" />
                 二次创作
+              </button>
+            )}
+            {/* 编辑图片 —— 打开全屏编辑器 */}
+            {onEdit && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onEdit(task, img); }}
+                title="编辑这张图"
+                className="flex h-8 items-center gap-1.5 rounded-full border border-line bg-paper-2/90 px-3 text-xs font-medium text-ink backdrop-blur-sm transition hover:border-accent hover:text-accent"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                编辑
               </button>
             )}
           </div>

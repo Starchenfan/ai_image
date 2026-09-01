@@ -82,7 +82,8 @@ export function buildTreeFromHistory(
   let ancestorId: string | null = selectedImageId;
   while (ancestorId && !connected.has(ancestorId)) {
     connected.add(ancestorId);
-    const parentId = byId.get(ancestorId)?.parentId ?? null;
+    const parentItem = byId.get(ancestorId);
+    const parentId: string | null = parentItem?.parentId ?? null;
     // 把父节点的所有子节点（即当前节点的兄弟）也纳入，否则从子分支
     // 进入画布时只显示一条链路，父节点的其它分支全部丢失。
     if (parentId) {

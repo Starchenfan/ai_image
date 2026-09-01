@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Download,
   Search,
-  ImageIcon,
+  Edit3,
   SlidersHorizontal,
   ClipboardCopy,
   ImagePlus,
@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStudio } from "@/lib/store";
 import { VersionTree } from "@/components/studio/version-tree/version-tree";
+import { ImageEditor } from "@/components/studio/image-editor";
 import { Portal } from "@/components/ui/portal";
 
 type Filter = "all" | "today" | "favorite";
@@ -147,6 +148,37 @@ export default function HistoryPage() {
     task: GenerateTask;
     image: GeneratedImage;
   } | null>(null);
+  // 图片编辑器：用户在历史卡片上点「编辑」时，打开全屏编辑器。
+  const [editTarget, setEditTarget] = useState<{
+    imageSrc: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  // 编辑器所需的模型/服务列表（异步拉取，编辑器面板用）。
+  const [editorModels, setEditorModels] = useState<AiModel[]>([]);
+  const [editorServices, setEditorServices] = useState<AiService[]>([]);
+
+  // 加载编辑器所需的模型/服务列表
+  useEffect(() => {
+    if (!editTarget) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        const [svcsRes, allModelsRes] = await Promise.all([
+          fetch("/api/services"),
+          fetch("/api/models"),
+        ]);
+        const svcs = (await svcsRes.json()).services as AiService[];
+        const allModels = (await allModelsRes.json()).models as AiModel[];
+        if (!cancelled) {
+          setEditorServices(svcs);
+          setEditorModels(allModels);
+        }
+      } catch { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [editTarget]);
 
   /**
    * reuse — 「复用参数」按钮的回调，历史页 → 工作台的主通道。
@@ -172,6 +204,17 @@ export default function HistoryPage() {
     const img = h.images[0];
     if (!img) return;
     setBranchTarget({ task: toTask(h), image: img });
+  };
+
+  /**
+   * edit — 历史卡片上「编辑」的回调。
+   *
+   * 打开全屏图片编辑器，用户可以做基础调整/裁剪/滤镜，也可以用 AI 编辑。
+   */
+  const edit = (h: HistoryItem) => {
+    const img = h.images[0];
+    if (!img) return;
+    setEditTarget({ imageSrc: img.url, width: img.width, height: img.height });
   };
 
   /**
@@ -326,7 +369,7 @@ export default function HistoryPage() {
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-ink-3">
-                    <ImageIcon className="h-6 w-6" />
+                    <ImagePlus className="h-6 w-6" />
                   </div>
                 )}
                 <div className="absolute right-2 top-2 flex gap-1">
@@ -377,6 +420,11 @@ export default function HistoryPage() {
                   icon={ImagePlus}
                   label="二次创作（在原图基础上改 prompt / 变体 / 图生图）"
                   onClick={() => branch(h)}
+                />
+                <ActionBtn
+                  icon={Edit3}
+                  label="编辑（调整/滤镜/AI 编辑）"
+                  onClick={() => edit(h)}
                 />
                 <ActionBtn
                   icon={SlidersHorizontal}
@@ -434,6 +482,30 @@ export default function HistoryPage() {
           image={branchTarget.image}
           onClose={() => setBranchTarget(null)}
           onStarted={() => {}}
+        />
+      </Portal>
+    )}
+    {editTarget && (
+      <Portal>
+        <ImageEditor
+          imageSrc={editTarget.imageSrc}
+          imageWidth={editTarget.width}
+          imageHeight={editTarget.height}
+          models={editorModels}
+          services={editorServices}
+          onClose={() => setEditTarget(null)}
+          onApply={(url) => {
+            // 应用编辑结果：刷新历史列表
+            qc.invalidateQueries({ queryKey: ["history"] });
+            setEditTarget(null);
+          }}
+          onExport={(url, format) => {
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `huijie-edited.${format}`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
         />
       </Portal>
     )}

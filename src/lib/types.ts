@@ -140,6 +140,66 @@ export interface Preset {
   createdAt: number;
 }
 
+// ── 图片编辑（Image Editor） ──
+
+/** AI 图片编辑操作类型。 */
+export type ImageEditOperation =
+  | "inpaint"    // 局部重绘（需 mask）
+  | "remove"     // 删除对象
+  | "add"        // 添加物体
+  | "replace"    // 替换对象
+  | "background" // 换背景
+  | "outpaint"   // 扩图
+  | "restore"    // 修复
+  | "upscale";   // 超分
+
+/** AI 图片编辑请求。 */
+export interface ImageEditRequest {
+  /** 源图片 data URL 或 URL。 */
+  image: string;
+  /** 遮罩 data URL（inpaint / remove / add / replace 时需要）。 */
+  mask?: string;
+  /** 编辑操作类型。 */
+  operation: ImageEditOperation;
+  /** 用户 Prompt。 */
+  prompt: string;
+  /** 负面 Prompt。 */
+  negativePrompt?: string;
+  /** 使用的模型 ID。 */
+  modelId: string;
+  /** 服务 ID。 */
+  serviceId: string;
+  /** 编辑强度 0-1。 */
+  strength?: number;
+  /** 目标宽度。 */
+  width?: number;
+  /** 目标高度。 */
+  height?: number;
+  /** 扩图方向（outpaint 时有效）。 */
+  outpaintDirection?: "up" | "down" | "left" | "right" | "all";
+  /** 超分倍数（upscale 时有效）。 */
+  upscaleFactor?: 2 | 4;
+  /** 目标尺寸字符串（outpaint / upscale 时有效，如 "1024x1024"）。 */
+  size?: string;
+  /** 由服务端解析后注入的完整服务/模型对象（适配器需要，不序列化到客户端）。 */
+  service?: AiService;
+  model?: AiModel;
+  /** 真实 API Key——由服务端注入，不保存到任务对象，也不会序列化到客户端。 */
+  apiKey?: string;
+}
+
+/** AI 图片编辑结果。 */
+export interface ImageEditResult {
+  /** 结果图片 URL。 */
+  url: string;
+  /** 宽度。 */
+  width: number;
+  /** 高度。 */
+  height: number;
+  /** 该结果在候选中的索引。 */
+  index: number;
+}
+
 /** 任务状态机：queued(排队中) → processing(调用 AI 模型) → generating(生成图片中) → completed(完成) / failed(失败) / canceled(已取消)。 */
 export type TaskStatus =
   | "queued"
@@ -228,6 +288,8 @@ export interface ImageProvider {
   generate(params: GenerateParams): Promise<GenerateProviderResult>;
   getTaskStatus?(taskId: string): Promise<ProviderTaskStatus>;
   cancelTask?(taskId: string): Promise<void>;
+  /** AI 图片编辑（inpaint / outpaint / remove 等）。 */
+  editImage?(params: ImageEditRequest): Promise<ImageEditResult[]>;
 }
 
 export interface GenerateParams {

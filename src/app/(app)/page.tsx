@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ImagePlus, Layers } from "lucide-react";
 import { useStudio } from "@/lib/store";
@@ -15,9 +15,10 @@ import { GenerateButton } from "@/components/studio/generate-button";
 import { TaskStatus } from "@/components/studio/task-status";
 import { ResultGrid } from "@/components/studio/result-grid";
 import { VersionTree } from "@/components/studio/version-tree/version-tree";
+import { ImageEditor } from "@/components/studio/image-editor";
 import { Portal } from "@/components/ui/portal";
 import { CompareBoard, type CompareEntry } from "@/components/studio/compare-board";
-import type { AiModel, GenerateTask, GeneratedImage } from "@/lib/types";
+import type { AiModel, GenerateTask, GeneratedImage, AiService } from "@/lib/types";
 
 // fetchModel — 按 modelId 拉取单个模型的完整定义（含参数 Schema）。
 // 之所以单独抽出来而不是复用 /api/models 列表接口，是因为工作台需要的是
@@ -58,6 +59,37 @@ export default function StudioPage() {
     task: GenerateTask;
     image: GeneratedImage;
   } | null>(null);
+  // 图片编辑器：用户在某张已生成图上点「编辑」时，打开全屏编辑器。
+  const [editTarget, setEditTarget] = useState<{
+    imageSrc: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  // 编辑器所需的模型/服务列表（异步拉取，编辑器面板用）。
+  const [editorModels, setEditorModels] = useState<AiModel[]>([]);
+  const [editorServices, setEditorServices] = useState<AiService[]>([]);
+
+  // 加载编辑器所需的模型/服务列表
+  useEffect(() => {
+    if (!editTarget) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        const [svcsRes, allModelsRes] = await Promise.all([
+          fetch("/api/services"),
+          fetch("/api/models"),
+        ]);
+        const svcs = (await svcsRes.json()).services as AiService[];
+        const allModels = (await allModelsRes.json()).models as AiModel[];
+        if (!cancelled) {
+          setEditorServices(svcs);
+          setEditorModels(allModels);
+        }
+      } catch { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [editTarget]);
 
   // model：当前选中模型的完整定义。enabled 跟踪 modelId，切模型时自动重取；
   // 参数轨里的「动态参数」区块（AdvancedParams）依赖这个 data 才能渲染。
@@ -181,6 +213,46 @@ export default function StudioPage() {
   };
 
   /**
+   * handleEdit — 在某张已生成图上点「编辑」。
+   *
+   * 打开全屏图片编辑器，用户可以在画布上做基础调整/裁剪/滤镜，
+   * 也可以用 AI 编辑（局部重绘/删除/添加/换背景/扩图/超分等）。
+   */
+  const handleEdit = (task: GenerateTask, image: GeneratedImage) => {
+    setEditTarget({ imageSrc: image.url, width: image.width, height: image.height });
+  };
+
+  /**
+   * handleEditApply — 编辑器里 AI 编辑结果「应用」后的回调。
+   *
+   * 把新生成的图片 URL 回填到 store 的 results，让画布显示编辑后的图。
+   */
+  const handleEditApply = (resultUrl: string) => {
+    if (!results) return;
+    const updated: GenerateTask = {
+      ...results,
+      images: results.images.map((img) =>
+        img.url === editTarget?.imageSrc ? { ...img, url: resultUrl } : img
+      ),
+    };
+    set("results", updated);
+    setEditTarget(null);
+  };
+
+  /**
+   * handleEditExport — 编辑器导出时的回调。
+   *
+   * 把编辑后的图片通过 store 通知给用户（例如触发下载）。
+   */
+  const handleEditExport = (url: string, format: string) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `studio-edited.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /**
    * handleBranchStarted — 分支任务提交成功。
    *
    * 全屏树状画布（VersionTree）自己管理分支提交与轮询：提交后画布保持打开，
@@ -291,7 +363,7 @@ export default function StudioPage() {
                 </p>
               </div>
             </div>
-            <ResultGrid task={results} onBranch={handleBranch} onRemove={handleRemove} />
+            <ResultGrid task={results} onBranch={handleBranch} onEdit={handleEdit} onRemove={handleRemove} />
           </div>
         ) : (
           <EmptyState />
@@ -303,6 +375,20 @@ export default function StudioPage() {
               image={branchTarget.image}
               onClose={() => setBranchTarget(null)}
               onStarted={handleBranchStarted}
+            />
+          </Portal>
+        )}
+        {editTarget && (
+          <Portal>
+            <ImageEditor
+              imageSrc={editTarget.imageSrc}
+              imageWidth={editTarget.width}
+              imageHeight={editTarget.height}
+              models={editorModels}
+              services={editorServices}
+              onClose={() => setEditTarget(null)}
+              onApply={handleEditApply}
+              onExport={handleEditExport}
             />
           </Portal>
         )}
