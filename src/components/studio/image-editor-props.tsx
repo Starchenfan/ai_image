@@ -109,6 +109,8 @@ interface Props {
   onLineWidthChange: (w: number) => void;
   cropAspectRatio: string;
   onCropAspectRatioChange: (r: string) => void;
+  onShapeCommit?: (rect: { x: number; y: number; w: number; h: number }) => void;
+  onTextCommit?: (x: number, y: number, text: string) => void;
 }
 
 export const ImageEditorPropsPanel = memo(function ImageEditorPropsPanel({
@@ -148,6 +150,8 @@ export const ImageEditorPropsPanel = memo(function ImageEditorPropsPanel({
   onLineWidthChange,
   cropAspectRatio,
   onCropAspectRatioChange,
+  onShapeCommit,
+  onTextCommit,
 }: Props) {
   const [activeTab, setActiveTab] = useState("ai");
 

@@ -3,6 +3,7 @@
 import { memo } from "react";
 import {
   MousePointer,
+  Hand,
   Crop,
   Brush,
   Eraser,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/cn";
 
 export type DrawTool =
   | "select"
+  | "pan"
   | "crop"
   | "brush"
   | "eraser"
@@ -56,6 +58,7 @@ interface ToolbarProps {
 
 const TOOLS: Array<{ id: DrawTool; icon: React.ReactNode; label: string }> = [
   { id: "select", icon: <MousePointer className="h-4 w-4" />, label: "选择" },
+  { id: "pan", icon: <Hand className="h-4 w-4" />, label: "平移" },
   { id: "crop", icon: <Crop className="h-4 w-4" />, label: "裁剪" },
   { id: "brush", icon: <Brush className="h-4 w-4" />, label: "画笔" },
   { id: "eraser", icon: <Eraser className="h-4 w-4" />, label: "橡皮擦" },

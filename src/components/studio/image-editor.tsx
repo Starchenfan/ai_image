@@ -3,19 +3,34 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { X, Download, Eye, EyeOff, ChevronLeft, Undo2, Redo2 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ImageEditorCanvas, type CanvasTransform, type CropRect, type Adjustments } from "./image-editor-canvas";
-import { Toolbar, type DrawTool, type FilterPresetKey } from "./image-editor-toolbar";
+import { ImageEditorCanvas } from "./image-editor-canvas";
+import { Toolbar, type DrawTool } from "./image-editor-toolbar";
 import { ImageEditorPropsPanel } from "./image-editor-props";
 import { ImageEditorLayers, type Layer } from "./image-editor-layers";
 import type { AiModel, AiService } from "@/lib/types";
 import type { ImageEditOperation } from "./image-editor-ai";
+import type {
+  Adjustments,
+  CropRect,
+  EditorObject,
+  FilterPresetKey,
+  InteractionState,
+  ShapeObject,
+  TextObject,
+  ViewportTransform,
+} from "./image-editor-types";
 
-// ── 类型 ──
+// ── History ──
+// 记录 Document State（可序列化），不记录 Canvas Reference。
+// Viewport（zoom/pan/rotation/flip）不属于 Document History。
 
 interface HistoryState {
-  imageCanvas: HTMLCanvasElement | null;
-  overlayCanvas: HTMLCanvasElement | null;
-  maskCanvas: HTMLCanvasElement | null;
+  crop: CropRect | null;
+  maskDataUrl: string | null;
+  objects: EditorObject[];
+  layers: Layer[];
+  adjustments: Adjustments;
+  filter: FilterPresetKey;
 }
 
 // ── 组件 ──
@@ -43,11 +58,8 @@ export function ImageEditor({
 }: ImageEditorProps) {
   // ── 状态 ──
   const [htmlImage, setHtmlImage] = useState<HTMLImageElement | null>(null);
-  const [transform, setTransform] = useState<CanvasTransform>({
-    scale: 1,
-    rotation: 0,
-    flipX: false,
-    flipY: false,
+  const [viewport, setViewport] = useState<ViewportTransform>({
+    x: 0, y: 0, scale: 1, rotation: 0, flipX: false, flipY: false,
   });
   const [crop, setCrop] = useState<CropRect | null>(null);
   const [tool, setTool] = useState<DrawTool>("select");
@@ -60,12 +72,7 @@ export function ImageEditor({
   const [lineWidth, setLineWidth] = useState(3);
   const [cropAspectRatio, setCropAspectRatio] = useState("free");
   const [adjustments, setAdjustments] = useState<Adjustments>({
-    brightness: 100,
-    contrast: 100,
-    saturation: 100,
-    hue: 0,
-    blur: 0,
-    sharpen: 0,
+    brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0,
   });
   const [filter, setFilter] = useState<FilterPresetKey>("none");
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
@@ -85,11 +92,11 @@ export function ImageEditor({
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [layers, setLayers] = useState<Layer[]>([]);
+  const [objects, setObjects] = useState<EditorObject[]>([]);
 
-  // 历史记录上限 — 超过即从头部丢弃，避免内存无限增长
+  // 历史记录上限
   const MAX_HISTORY = 20;
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -103,12 +110,8 @@ export function ImageEditor({
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.onload = () => {
-      setHtmlImage(img);
-    };
-    img.onerror = () => {
-      console.error("[editor] 图片加载失败:", imageSrc);
-    };
+    img.onload = () => setHtmlImage(img);
+    img.onerror = () => console.error("[editor] 图片加载失败:", imageSrc);
     img.src = imageSrc;
   }, [imageSrc]);
 
@@ -136,7 +139,6 @@ export function ImageEditor({
       oc.height = htmlImage.height;
       overlayCanvasRef.current = oc;
     }
-    // 初始化图层
     setLayers([
       { id: "bg", name: "背景", type: "image", visible: true, locked: true, order: 0 },
       { id: "drawing", name: "绘图", type: "brush", visible: true, locked: false, order: 1 },
@@ -150,16 +152,18 @@ export function ImageEditor({
   const showOverlay = layers.find((l) => l.id === "drawing")?.visible ?? true;
   const showMask = layers.find((l) => l.id === "mask")?.visible ?? false;
 
-  // ── 历史 ──
+  // ── History ──
   const saveHistory = useCallback(() => {
     setHistory((h) => {
       const newH = h.slice(0, historyIdx + 1);
       newH.push({
-        imageCanvas: imageCanvasRef.current,
-        overlayCanvas: overlayCanvasRef.current,
-        maskCanvas: maskCanvasRef.current,
+        crop: crop ?? null,
+        maskDataUrl: maskCanvasRef.current?.toDataURL() ?? null,
+        objects: objects.map((o) => ({ ...o } as EditorObject)),
+        layers: layers.map((l) => ({ ...l })),
+        adjustments: { ...adjustments },
+        filter,
       });
-      // 限制历史记录数量 — 超过上限从头部丢弃
       let newIdx = newH.length - 1;
       if (newH.length > MAX_HISTORY) {
         newH.shift();
@@ -170,21 +174,42 @@ export function ImageEditor({
       setCanRedo(false);
       return newH;
     });
-  }, [historyIdx]);
+  }, [historyIdx, crop, objects, layers, adjustments, filter]);
 
   const undo = useCallback(() => {
     if (historyIdx <= 0) return;
     const state = history[historyIdx - 1];
-    if (state.imageCanvas && imageCanvasRef.current) {
-      imageCanvasRef.current.getContext("2d")!.drawImage(state.imageCanvas, 0, 0);
+
+    // 恢复 crop
+    setCrop(state.crop);
+
+    // 恢复 mask
+    if (state.maskDataUrl && maskCanvasRef.current) {
+      const mc = maskCanvasRef.current;
+      const img = new Image();
+      img.onload = () => {
+        const ctx = mc.getContext("2d")!;
+        ctx.clearRect(0, 0, mc.width, mc.height);
+        ctx.drawImage(img, 0, 0);
+        setMaskDataUrl(state.maskDataUrl);
+      };
+      img.src = state.maskDataUrl;
+    } else if (!state.maskDataUrl && maskCanvasRef.current) {
+      const mc = maskCanvasRef.current;
+      mc.getContext("2d")!.clearRect(0, 0, mc.width, mc.height);
+      setMaskDataUrl(null);
     }
-    if (state.overlayCanvas && overlayCanvasRef.current) {
-      overlayCanvasRef.current.getContext("2d")!.drawImage(state.overlayCanvas, 0, 0);
-    }
-    if (state.maskCanvas && maskCanvasRef.current) {
-      maskCanvasRef.current.getContext("2d")!.drawImage(state.maskCanvas, 0, 0);
-      setMaskDataUrl(maskCanvasRef.current.toDataURL());
-    }
+
+    // 恢复 objects
+    setObjects(state.objects.map((o) => ({ ...o } as EditorObject)));
+
+    // 恢复 layers
+    setLayers(state.layers.map((l) => ({ ...l })));
+
+    // 恢复 adjustments + filter
+    setAdjustments({ ...state.adjustments });
+    setFilter(state.filter);
+
     setHistoryIdx(historyIdx - 1);
     setCanUndo(historyIdx - 1 > 0);
     setCanRedo(true);
@@ -193,16 +218,30 @@ export function ImageEditor({
   const redo = useCallback(() => {
     if (historyIdx >= history.length - 1) return;
     const state = history[historyIdx + 1];
-    if (state.imageCanvas && imageCanvasRef.current) {
-      imageCanvasRef.current.getContext("2d")!.drawImage(state.imageCanvas, 0, 0);
+
+    setCrop(state.crop);
+
+    if (state.maskDataUrl && maskCanvasRef.current) {
+      const mc = maskCanvasRef.current;
+      const img = new Image();
+      img.onload = () => {
+        const ctx = mc.getContext("2d")!;
+        ctx.clearRect(0, 0, mc.width, mc.height);
+        ctx.drawImage(img, 0, 0);
+        setMaskDataUrl(state.maskDataUrl);
+      };
+      img.src = state.maskDataUrl;
+    } else if (!state.maskDataUrl && maskCanvasRef.current) {
+      const mc = maskCanvasRef.current;
+      mc.getContext("2d")!.clearRect(0, 0, mc.width, mc.height);
+      setMaskDataUrl(null);
     }
-    if (state.overlayCanvas && overlayCanvasRef.current) {
-      overlayCanvasRef.current.getContext("2d")!.drawImage(state.overlayCanvas, 0, 0);
-    }
-    if (state.maskCanvas && maskCanvasRef.current) {
-      maskCanvasRef.current.getContext("2d")!.drawImage(state.maskCanvas, 0, 0);
-      setMaskDataUrl(maskCanvasRef.current.toDataURL());
-    }
+
+    setObjects(state.objects.map((o) => ({ ...o } as EditorObject)));
+    setLayers(state.layers.map((l) => ({ ...l })));
+    setAdjustments({ ...state.adjustments });
+    setFilter(state.filter);
+
     setHistoryIdx(historyIdx + 1);
     setCanUndo(true);
     setCanRedo(historyIdx + 1 < history.length - 1);
@@ -218,28 +257,15 @@ export function ImageEditor({
 
     const parts: string[] = [];
     switch (filter) {
-      case "grayscale":
-        parts.push("grayscale(100%)");
-        break;
-      case "sepia":
-        parts.push("sepia(50%)");
-        break;
-      case "vintage":
-        parts.push("sepia(40%) saturate(1.3) brightness(1.1) contrast(1.1)");
-        break;
-      case "film":
-        parts.push("contrast(1.2) saturate(0.8) brightness(0.95) hue-rotate(-10deg)");
-        break;
-      case "cool":
-        parts.push("hue-rotate(20deg) saturate(1.1)");
-        break;
-      case "warm":
-        parts.push("hue-rotate(-15deg) saturate(1.2) brightness(1.05)");
-        break;
+      case "grayscale": parts.push("grayscale(100%)"); break;
+      case "sepia": parts.push("sepia(50%)"); break;
+      case "vintage": parts.push("sepia(40%) saturate(1.3) brightness(1.1) contrast(1.1)"); break;
+      case "film": parts.push("contrast(1.2) saturate(0.8) brightness(0.95) hue-rotate(-10deg)"); break;
+      case "cool": parts.push("hue-rotate(20deg) saturate(1.1)"); break;
+      case "warm": parts.push("hue-rotate(-15deg) saturate(1.2) brightness(1.05)"); break;
     }
     if (parts.length) ctx.filter = parts.join(" ");
     else ctx.filter = "none";
-
     ctx.drawImage(src, 0, 0);
     ctx.filter = "none";
   }, [filter]);
@@ -248,7 +274,7 @@ export function ImageEditor({
     applyFilterToCanvas();
   }, [applyFilterToCanvas]);
 
-  // 稳定的回调 — 避免每次父 render 都创建新函数 identity
+  // ── 稳定的回调 ──
   const handleImageCanvasReady = useCallback((c: HTMLCanvasElement) => {
     imageCanvasRef.current = c;
   }, []);
@@ -319,6 +345,7 @@ export function ImageEditor({
       maskCanvasRef.current.getContext("2d")!.clearRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
       setMaskDataUrl(null);
     }
+    setObjects([]);
     setAiResults([]);
     setCompareResult(null);
     onApply(target);
@@ -333,7 +360,6 @@ export function ImageEditor({
   // ── 导出 ──
   const handleExport = useCallback(
     (format: "png" | "jpeg" | "webp") => {
-      // 按需创建 export canvas — 不在每次 render 时重建
       const canvas = document.createElement("canvas");
       canvas.width = imageWidth;
       canvas.height = imageHeight;
@@ -344,6 +370,47 @@ export function ImageEditor({
       }
       if (overlayCanvasRef.current) {
         ctx.drawImage(overlayCanvasRef.current, 0, 0);
+      }
+      // 绘制 objects（shapes + text）到导出画布
+      for (const obj of objects) {
+        ctx.save();
+        ctx.fillStyle = obj.color;
+        ctx.strokeStyle = obj.color;
+        if (obj.type === "text") {
+          ctx.font = `${obj.fontWeight} ${obj.fontSize}px ${obj.fontFamily}`;
+          ctx.fillText(obj.text, obj.x, obj.y);
+        } else {
+          ctx.lineWidth = obj.lineWidth;
+          if (obj.type === "rect") {
+            ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+          } else if (obj.type === "circle") {
+            const cx = obj.x + obj.width / 2;
+            const cy = obj.y + obj.height / 2;
+            const r = Math.max(obj.width, obj.height) / 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (obj.type === "line") {
+            ctx.beginPath();
+            ctx.moveTo(obj.x, obj.y);
+            ctx.lineTo(obj.x + obj.width, obj.y + obj.height);
+            ctx.stroke();
+          } else if (obj.type === "arrow") {
+            const ax = obj.x + obj.width;
+            const ay = obj.y + obj.height / 2;
+            ctx.beginPath();
+            ctx.moveTo(obj.x, obj.y + obj.height / 2);
+            ctx.lineTo(ax, ay);
+            const ang = Math.atan2(obj.height, obj.width);
+            const ah = 12;
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(ax - ah * Math.cos(ang - Math.PI / 6), ay - ah * Math.sin(ang - Math.PI / 6));
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(ax - ah * Math.cos(ang + Math.PI / 6), ay - ah * Math.sin(ang + Math.PI / 6));
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
       }
 
       const mime = format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
@@ -357,17 +424,81 @@ export function ImageEditor({
         format === "webp" ? 0.9 : 0.95
       );
     },
-    [imageWidth, imageHeight, onExport]
+    [imageWidth, imageHeight, onExport, objects]
   );
 
   // ── 视图操作 ──
-  const zoomIn = () => setTransform((t) => ({ ...t, scale: Math.min(t.scale * 1.2, 3) }));
-  const zoomOut = () => setTransform((t) => ({ ...t, scale: Math.max(t.scale / 1.2, 0.3) }));
-  const resetView = () => setTransform({ scale: 1, rotation: 0, flipX: false, flipY: false });
-  const flipX = () => setTransform((t) => ({ ...t, flipX: !t.flipX }));
-  const flipY = () => setTransform((t) => ({ ...t, flipY: !t.flipY }));
-  const rotLeft = () => setTransform((t) => ({ ...t, rotation: (t.rotation + 90) % 360 }));
-  const rotRight = () => setTransform((t) => ({ ...t, rotation: (t.rotation - 90 + 360) % 360 }));
+  const zoomIn = () => setViewport((v) => ({ ...v, scale: Math.min(v.scale * 1.2, 4) }));
+  const zoomOut = () => setViewport((v) => ({ ...v, scale: Math.max(v.scale / 1.2, 0.25) }));
+  const resetView = () => setViewport({ x: 0, y: 0, scale: 1, rotation: 0, flipX: false, flipY: false });
+  const flipX = () => setViewport((v) => ({ ...v, flipX: !v.flipX }));
+  const flipY = () => setViewport((v) => ({ ...v, flipY: !v.flipY }));
+  const rotLeft = () => setViewport((v) => ({ ...v, rotation: (v.rotation + 90) % 360 }));
+  const rotRight = () => setViewport((v) => ({ ...v, rotation: (v.rotation - 90 + 360) % 360 }));
+
+  // ── Shape / Text commit ──
+  const handleShapeCommit = useCallback((rect: { x: number; y: number; w: number; h: number }) => {
+    const obj: ShapeObject = {
+      id: `shape_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: shapeType,
+      x: rect.x,
+      y: rect.y,
+      width: rect.w,
+      height: rect.h,
+      rotation: 0,
+      color: shapeColor,
+      opacity: 1,
+      lineWidth,
+    };
+    setObjects((prev) => [...prev, obj]);
+    // 同步画到 overlay canvas（用于显示）
+    if (overlayCanvasRef.current) {
+      const octx = overlayCanvasRef.current.getContext("2d")!;
+      octx.strokeStyle = shapeColor;
+      octx.lineWidth = Math.max(2, fontSize / 12);
+      octx.fillStyle = shapeColor;
+      if (shapeType === "rect") octx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      else if (shapeType === "circle") {
+        const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+        const r = Math.max(rect.w, rect.h) / 2;
+        octx.beginPath(); octx.arc(cx, cy, r, 0, Math.PI * 2); octx.stroke();
+      } else if (shapeType === "line") {
+        octx.beginPath(); octx.moveTo(rect.x, rect.y); octx.lineTo(rect.x + rect.w, rect.y + rect.h); octx.stroke();
+      } else if (shapeType === "arrow") {
+        const ax = rect.x + rect.w, ay = rect.y + rect.h / 2;
+        octx.beginPath(); octx.moveTo(rect.x, rect.y + rect.h / 2); octx.lineTo(ax, ay);
+        const ang = Math.atan2(rect.h, rect.w); const ah = 12;
+        octx.moveTo(ax, ay); octx.lineTo(ax - ah * Math.cos(ang - Math.PI / 6), ay - ah * Math.sin(ang - Math.PI / 6));
+        octx.moveTo(ax, ay); octx.lineTo(ax - ah * Math.cos(ang + Math.PI / 6), ay - ah * Math.sin(ang + Math.PI / 6));
+        octx.stroke();
+      }
+    }
+    saveHistory();
+  }, [shapeType, shapeColor, lineWidth, fontSize]);
+
+  const handleTextCommit = useCallback((x: number, y: number, text: string) => {
+    const obj: TextObject = {
+      id: `text_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "text",
+      text,
+      x,
+      y,
+      fontSize,
+      fontFamily: "sans-serif",
+      fontWeight: 400,
+      color: textColor,
+      opacity: 1,
+      rotation: 0,
+    };
+    setObjects((prev) => [...prev, obj]);
+    if (overlayCanvasRef.current) {
+      const octx = overlayCanvasRef.current.getContext("2d")!;
+      octx.fillStyle = textColor;
+      octx.font = `${fontSize}px sans-serif`;
+      octx.fillText(text, x, y);
+    }
+    saveHistory();
+  }, [fontSize, textColor]);
 
   // ── 图层操作 ──
   const handleLayersChange = (newLayers: Layer[]) => {
@@ -375,14 +506,13 @@ export function ImageEditor({
     const removedMask = layers.find((l) => l.id === "mask") && !newLayers.find((l) => l.id === "mask");
     if (removedDrawing && overlayCanvasRef.current) {
       overlayCanvasRef.current.getContext("2d")!.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
-      saveHistory();
     }
     if (removedMask && maskCanvasRef.current) {
       maskCanvasRef.current.getContext("2d")!.clearRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
       setMaskDataUrl(null);
-      saveHistory();
     }
     setLayers(newLayers);
+    saveHistory();
   };
 
   // ── Before/After 对比拖拽 ──
@@ -392,7 +522,6 @@ export function ImageEditor({
     const x = e.clientX - rect.left;
     const pos = Math.max(0, Math.min(100, (x / rect.width) * 100));
     comparePosRef.current = pos;
-    // rAF 节流 — 鼠标移动期间不直接触发 React render
     if (rafCompareRef.current) return;
     rafCompareRef.current = requestAnimationFrame(() => {
       rafCompareRef.current = null;
@@ -403,28 +532,52 @@ export function ImageEditor({
   // ── 键盘快捷键 ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setCompareMode(false);
-        setAiResults([]);
-        setCompareResult(null);
+      // Ctrl/Meta 组合键
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "0") { e.preventDefault(); resetView(); }
+        else if (e.key === "=" || e.key === "+") { e.preventDefault(); zoomIn(); }
+        else if (e.key === "-") { e.preventDefault(); zoomOut(); }
+        else if (e.key === "z") {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+        }
+        else if (e.key === "y") { e.preventDefault(); redo(); }
         return;
       }
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === "0") {
-          e.preventDefault();
-          resetView();
-        } else if (e.key === "=" || e.key === "+") {
-          e.preventDefault();
-          zoomIn();
-        } else if (e.key === "-") {
-          e.preventDefault();
-          zoomOut();
-        }
+
+      // 工具快捷键（仅在画布区域聚焦时触发，避免在输入框中误触发）
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      switch (e.key) {
+        case "v": setTool("select"); break;
+        case "h": setTool("pan"); break;
+        case "c": setTool("crop"); break;
+        case "b": setTool("brush"); break;
+        case "e": setTool("eraser"); break;
+        case "t": setTool("text"); break;
+        case "r": setTool("shape"); break;
+        case "a": setTool("ai"); break;
+        case "Delete":
+        case "Backspace":
+          // 删除当前选中的对象（简化：删除最后一个对象）
+          if (objects.length > 0) {
+            setObjects((prev) => prev.slice(0, -1));
+            saveHistory();
+          }
+          break;
+        case "Escape":
+          setCompareMode(false);
+          setAiResults([]);
+          setCompareResult(null);
+          break;
+        default: break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [resetView, zoomIn, zoomOut]);
+  }, [resetView, zoomIn, zoomOut, undo, redo, objects, saveHistory]);
 
   if (!htmlImage) {
     return (
@@ -476,16 +629,12 @@ export function ImageEditor({
           <button
             type="button"
             onClick={() => {
-              if (compareResult) {
-                setCompareMode(!compareMode);
-              }
+              if (compareResult) setCompareMode(!compareMode);
             }}
             disabled={!compareResult}
             className={cn(
               "flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-all",
-              compareMode
-                ? "bg-accent text-accent-ink"
-                : "text-ink-2 hover:bg-paper-4"
+              compareMode ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-paper-4"
             )}
           >
             {compareMode ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
@@ -526,7 +675,6 @@ export function ImageEditor({
         <div className="relative flex-1 overflow-auto" style={{ backgroundColor: "#111111" }}>
           <div ref={compareRef} className="relative h-full w-full">
             {compareMode && compareResult ? (
-              // Before/After 对比 — 居中显示
               <div className="flex h-full items-center justify-center p-4">
                 <div className="relative" style={{ maxWidth: "100%" }}>
                   <img
@@ -567,8 +715,8 @@ export function ImageEditor({
             ) : (
               <ImageEditorCanvas
                 image={htmlImage}
-                transform={transform}
-                onTransformChange={setTransform}
+                viewport={viewport}
+                onViewportChange={setViewport}
                 crop={crop}
                 tool={tool}
                 brushColor={brushColor}
@@ -578,13 +726,16 @@ export function ImageEditor({
                 shapeType={shapeType}
                 shapeColor={shapeColor}
                 adjustments={adjustments}
-                filters={{}}
+                filters={filter}
                 textValue={textValue}
                 showOverlay={showOverlay}
                 showMask={showMask}
                 onMaskChange={setMaskDataUrl}
                 onCropChange={setCrop}
                 onImageCanvasReady={handleImageCanvasReady}
+                onShapeCommit={handleShapeCommit}
+                onTextCommit={handleTextCommit}
+                onInteractionStateChange={() => {}}
               />
             )}
           </div>
@@ -592,10 +743,10 @@ export function ImageEditor({
           {/* 缩放指示器 */}
           <div className="absolute right-3 top-3 flex items-center gap-1 rounded-md border border-line bg-paper-2/90 px-2 py-1 backdrop-blur-sm">
             <span className="text-[10px] text-ink-3">缩放</span>
-            <span className="text-xs font-medium text-ink">{Math.round(transform.scale * 100)}%</span>
+            <span className="text-xs font-medium text-ink">{Math.round(viewport.scale * 100)}%</span>
           </div>
 
-          {/* 蒙版工具栏 — 画笔/橡皮擦时显示 */}
+          {/* 蒙版工具栏 */}
           {(tool === "brush" || tool === "eraser") && maskDataUrl && (
             <div className="absolute left-3 bottom-3 flex items-center gap-1 rounded-md border border-line bg-paper-2/90 p-1 backdrop-blur-sm">
               <button
@@ -618,7 +769,6 @@ export function ImageEditor({
                   if (maskCanvasRef.current) {
                     const mc = maskCanvasRef.current;
                     const ctx = mc.getContext("2d")!;
-                    // 用 globalCompositeOperation 反选 — GPU 加速，避免像素循环
                     const temp = document.createElement("canvas");
                     temp.width = mc.width;
                     temp.height = mc.height;
@@ -656,7 +806,6 @@ export function ImageEditor({
                     }}
                     className="group relative h-16 w-16 overflow-hidden rounded-md border border-line transition-all hover:border-accent"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={url} alt={`candidate-${i}`} className="h-full w-full object-cover" />
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                       <Eye className="h-4 w-4 text-white" />
